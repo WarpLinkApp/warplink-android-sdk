@@ -1,6 +1,6 @@
 # WarpLink Android SDK
 
-[![CI](https://github.com/AplnkTo/warplink-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/AplnkTo/warplink-android-sdk/actions/workflows/ci.yml)
+[![CI](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Deep linking SDK for Android. Handle App Links, deferred deep links, and install attribution with zero third-party dependencies.
