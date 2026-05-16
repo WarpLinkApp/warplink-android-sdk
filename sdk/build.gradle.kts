@@ -1,8 +1,10 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.SonatypeHost
+
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
-    `maven-publish`
-    signing
+    id("com.vanniktech.maven.publish")
 }
 
 android {
@@ -43,52 +45,42 @@ dependencies {
     testImplementation("androidx.test:core:1.6.1")
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("release") {
-                from(components["release"])
-                groupId = property("GROUP").toString()
-                artifactId = property("POM_ARTIFACT_ID").toString()
-                version = property("VERSION_NAME").toString()
+mavenPublishing {
+    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
+    signAllPublications()
 
-                pom {
-                    name.set(property("POM_NAME").toString())
-                    description.set(property("POM_DESCRIPTION").toString())
-                    url.set(property("POM_URL").toString())
+    configure(AndroidSingleVariantLibrary("release", sourcesJar = true, publishJavadocJar = true))
 
-                    licenses {
-                        license {
-                            name.set(property("POM_LICENCE_NAME").toString())
-                            url.set(property("POM_LICENCE_URL").toString())
-                        }
-                    }
+    coordinates(
+        groupId = property("GROUP").toString(),
+        artifactId = property("POM_ARTIFACT_ID").toString(),
+        version = property("VERSION_NAME").toString(),
+    )
 
-                    developers {
-                        developer {
-                            id.set(property("POM_DEVELOPER_ID").toString())
-                            name.set(property("POM_DEVELOPER_NAME").toString())
-                        }
-                    }
+    pom {
+        name.set(property("POM_NAME").toString())
+        description.set(property("POM_DESCRIPTION").toString())
+        url.set(property("POM_URL").toString())
+        inceptionYear.set("2026")
 
-                    scm {
-                        url.set(property("POM_SCM_URL").toString())
-                        connection.set(property("POM_SCM_CONNECTION").toString())
-                        developerConnection.set(
-                            property("POM_SCM_DEV_CONNECTION").toString()
-                        )
-                    }
-                }
+        licenses {
+            license {
+                name.set(property("POM_LICENCE_NAME").toString())
+                url.set(property("POM_LICENCE_URL").toString())
             }
         }
-    }
 
-    signing {
-        val signingKey = findProperty("signingInMemoryKey") as? String
-        val signingPassword = findProperty("signingInMemoryKeyPassword") as? String
-        if (signingKey != null && signingPassword != null) {
-            useInMemoryPgpKeys(signingKey, signingPassword)
-            sign(publishing.publications["release"])
+        developers {
+            developer {
+                id.set(property("POM_DEVELOPER_ID").toString())
+                name.set(property("POM_DEVELOPER_NAME").toString())
+            }
+        }
+
+        scm {
+            url.set(property("POM_SCM_URL").toString())
+            connection.set(property("POM_SCM_CONNECTION").toString())
+            developerConnection.set(property("POM_SCM_DEV_CONNECTION").toString())
         }
     }
 }
