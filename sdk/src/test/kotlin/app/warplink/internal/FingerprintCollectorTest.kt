@@ -1,6 +1,7 @@
 package app.warplink.internal
 
 import androidx.test.core.app.ApplicationProvider
+import app.warplink.WarpLink
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -63,6 +64,6 @@ class FingerprintCollectorTest {
         )
         var signals: DeviceSignals? = null
         collector.collectFingerprint { r -> signals = r.getOrNull() }
-        assertEquals("WarpLink-Android/0.1.0", signals!!.userAgent)
+        assertEquals("WarpLink-Android/${WarpLink.SDK_VERSION}", signals!!.userAgent)
     }
 }

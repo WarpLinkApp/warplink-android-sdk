@@ -13,7 +13,7 @@ import app.warplink.internal.performDeferredCheck
 
 object WarpLink {
 
-    const val SDK_VERSION = "0.1.0"
+    const val SDK_VERSION = "0.1.1"
 
     private val lock = Any()
     private var apiKey: String? = null

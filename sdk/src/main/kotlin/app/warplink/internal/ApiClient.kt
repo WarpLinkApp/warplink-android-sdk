@@ -188,7 +188,8 @@ internal class ApiClient(
         )
     }
 
-    private fun buildAttributionBody(
+    // internal (not private) so unit tests can assert the wire-body contract.
+    internal fun buildAttributionBody(
         signals: DeviceSignals?,
         sdkVersion: String,
         deviceId: String?,
@@ -202,6 +203,9 @@ internal class ApiClient(
         }
         if (referrer != null) {
             body.put("referrer", referrer)
+            // Schema requires fingerprint_version on every request; the
+            // deterministic referrer path carries no enriched signals.
+            body.put("fingerprint_version", "basic")
             return body
         }
         if (signals != null) {
