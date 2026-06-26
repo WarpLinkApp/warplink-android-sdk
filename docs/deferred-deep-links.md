@@ -49,7 +49,7 @@ The match window controls how far back the server looks for matching clicks. Def
 // Reduce match window to 48 hours for higher accuracy
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_your_api_key_here_abcdefgh",
+    apiKey = "wl_live_YOUR_KEY",
     options = WarpLinkOptions(matchWindowHours = 48)
 )
 ```

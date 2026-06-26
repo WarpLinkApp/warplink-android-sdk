@@ -42,7 +42,7 @@ Recreate your Firebase Dynamic Links as WarpLink links via the [dashboard](https
 
 ```bash
 curl -X POST https://api.warplink.app/v1/links \
-  -H "Authorization: Bearer wl_live_your_api_key_here_abcdefgh" \
+  -H "Authorization: Bearer wl_live_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "destination_url": "https://yourapp.com/product/123",
@@ -103,7 +103,7 @@ class MyApp : Application() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_your_api_key_here_abcdefgh"
+            apiKey = "wl_live_YOUR_KEY"
         )
     }
 }

@@ -17,7 +17,7 @@ class MyApp : Application() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_your_api_key_here_abcdefgh"
+            apiKey = "wl_live_YOUR_KEY"
         )
     }
 }
@@ -202,7 +202,7 @@ Enable debug logging to see all SDK activity in Logcat:
 ```kotlin
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_your_api_key_here_abcdefgh",
+    apiKey = "wl_live_YOUR_KEY",
     options = WarpLinkOptions(debugLogging = true)
 )
 ```

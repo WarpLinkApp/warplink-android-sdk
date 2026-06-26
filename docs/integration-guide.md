@@ -70,7 +70,7 @@ class MyApp : Application() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_your_api_key_here_abcdefgh"
+            apiKey = "wl_live_YOUR_KEY"
         )
     }
 }
@@ -89,7 +89,7 @@ You can also pass options for debug logging or a custom match window:
 ```kotlin
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_your_api_key_here_abcdefgh",
+    apiKey = "wl_live_YOUR_KEY",
     options = WarpLinkOptions(
         debugLogging = true,
         matchWindowHours = 48
@@ -284,7 +284,7 @@ adb logcat -s WarpLink
 
 ```bash
 curl -X POST https://api.warplink.app/v1/links \
-  -H "Authorization: Bearer wl_live_your_api_key_here_abcdefgh" \
+  -H "Authorization: Bearer wl_live_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "destination_url": "https://yourapp.com/product/123",
