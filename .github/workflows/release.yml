@@ -1,26 +1,48 @@
 name: Release
+
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing git tag to create a GitHub Release for (e.g. v1.0.0). Does NOT re-publish to Maven.'
+        required: true
+        type: string
+
+permissions:
+  contents: write # create the GitHub Release for the tag
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+      # Maven publish only runs for a real tag push. A manual dispatch is
+      # release-only (the version is already on Maven Central and is immutable).
       - name: Set version from tag
+        if: github.event_name == 'push'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           sed -i "s/VERSION_NAME=.*/VERSION_NAME=$VERSION/" gradle.properties
       - name: Publish to Maven Central
+        if: github.event_name == 'push'
         run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
