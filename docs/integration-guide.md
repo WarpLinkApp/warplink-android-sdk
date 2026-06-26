@@ -50,7 +50,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:0.1.0")
+    implementation("app.warplink:sdk:1.0.2")
 }
 ```
 
