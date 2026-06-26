@@ -13,7 +13,14 @@ import app.warplink.internal.performDeferredCheck
 
 object WarpLink {
 
-    const val SDK_VERSION = "1.0.2"
+    /**
+     * The SDK version. Sourced from the build's VERSION_NAME (the published
+     * Maven coordinate) via [BuildConfig] — do not replace this with a hardcoded
+     * literal. Keeping it generated guarantees the User-Agent and attribution
+     * `sdk_version` always match the released version, with nothing to bump by
+     * hand at release time beyond the git tag.
+     */
+    val SDK_VERSION: String = BuildConfig.SDK_VERSION
 
     private val lock = Any()
     private var apiKey: String? = null

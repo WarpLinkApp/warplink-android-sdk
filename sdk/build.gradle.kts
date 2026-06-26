@@ -15,6 +15,19 @@ android {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
+
+        // Single source of truth for the SDK version: derive it from
+        // VERSION_NAME (which the release workflow sets from the git tag) so the
+        // runtime version can never drift from the published Maven coordinate.
+        buildConfigField(
+            "String",
+            "SDK_VERSION",
+            "\"${project.property("VERSION_NAME")}\"",
+        )
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     lint {
