@@ -81,4 +81,15 @@ class InstallReferrerReaderTest {
         val referrer = "utm_source=warplink&utm_content=$upper"
         assertEquals(upper, InstallReferrerReader.parseWarpLinkReferrer(referrer))
     }
+
+    @Test
+    fun `a merged customer referrer still yields the WarpLink link id`() {
+        // The Worker prepends our pairs to a customer-supplied referrer rather
+        // than refusing it. That is only safe while the first occurrence of a
+        // duplicated key wins here. Flip the parser to last-wins and this fails.
+        val otherUuid = "0f5b9d1e-6a2c-4d3e-9f8a-1b2c3d4e5f60"
+        val referrer = "utm_source=warplink&utm_content=$validUuid" +
+            "&utm_source=facebook&utm_campaign=spring_sale&utm_content=$otherUuid"
+        assertEquals(validUuid, InstallReferrerReader.parseWarpLinkReferrer(referrer))
+    }
 }

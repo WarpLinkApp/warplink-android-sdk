@@ -1,24 +1,27 @@
 package app.warplink.internal
 
 import android.content.Context
-import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import app.warplink.MatchType
 import app.warplink.WarpLinkDeepLink
+import app.warplink.idleMainLooperUntil
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows
-import java.time.Duration
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 class DeferredDeepLinkTest {
+
+    // The endpoint is a dead port, so the check fails transiently and is retried. The
+    // wait before a retry is a `postDelayed` and nothing here moves the clock, so
+    // NO_WAIT is what lets the failure these tests are about actually arrive. What the
+    // waits are worth is pinned in BoundedRetryTest, against a fake scheduler.
 
     private lateinit var context: Context
     private lateinit var storage: Storage
@@ -26,10 +29,8 @@ class DeferredDeepLinkTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        context.getSharedPreferences(
-            "warplink_prefs", Context.MODE_PRIVATE
-        ).edit().clear().commit()
         storage = Storage(context)
+        storage.clearAll()
     }
 
     @Test
@@ -37,24 +38,25 @@ class DeferredDeepLinkTest {
         val latch = CountDownLatch(1)
         var result: Result<WarpLinkDeepLink?>? = null
         val apiClient = ApiClient(API_KEY, "http://localhost:1")
-        val fingerprintCollector = FingerprintCollector(context)
+        val fingerprintCollector = FingerprintCollector()
 
         performDeferredCheck(
             storage, fingerprintCollector, apiClient,
-            null, null
+            null, null,
+            settings = RetrySettings.NO_WAIT
         ) { r ->
             result = r
             latch.countDown()
         }
 
-        idleLooperUntilLatch(latch)
+        idleMainLooperUntil(latch)
 
         assertTrue(result!!.isFailure)
     }
 
     @Test
-    fun `not first launch returns cached attribution`() {
-        storage.isFirstLaunch = false
+    fun `completed check returns cached attribution without network`() {
+        storage.deferredCheckCompleted = true
         storage.cachedAttribution = WarpLinkDeepLink(
             linkId = "link-abc",
             destination = "https://example.com",
@@ -67,7 +69,7 @@ class DeferredDeepLinkTest {
 
         var result: Result<WarpLinkDeepLink?>? = null
         val apiClient = ApiClient(API_KEY, "http://localhost:1")
-        val fingerprintCollector = FingerprintCollector(context)
+        val fingerprintCollector = FingerprintCollector()
 
         performDeferredCheck(
             storage, fingerprintCollector, apiClient,
@@ -81,12 +83,12 @@ class DeferredDeepLinkTest {
     }
 
     @Test
-    fun `not first launch returns null when no cache`() {
-        storage.isFirstLaunch = false
+    fun `completed check returns null when no cache`() {
+        storage.deferredCheckCompleted = true
 
         var result: Result<WarpLinkDeepLink?>? = null
         val apiClient = ApiClient(API_KEY, "http://localhost:1")
-        val fingerprintCollector = FingerprintCollector(context)
+        val fingerprintCollector = FingerprintCollector()
 
         performDeferredCheck(
             storage, fingerprintCollector, apiClient,
@@ -100,41 +102,52 @@ class DeferredDeepLinkTest {
     }
 
     @Test
-    fun `referrer reader failure falls back to fingerprint`() {
+    fun `WL-S06 network failure does not consume the completion flag`() {
         val latch = CountDownLatch(1)
         var result: Result<WarpLinkDeepLink?>? = null
         val apiClient = ApiClient(API_KEY, "http://localhost:1")
-        val fingerprintCollector = FingerprintCollector(context)
-        val referrerReader = InstallReferrerReader(context)
+        val fingerprintCollector = FingerprintCollector()
 
         performDeferredCheck(
             storage, fingerprintCollector, apiClient,
-            referrerReader, null
+            null, null,
+            settings = RetrySettings.NO_WAIT
         ) { r ->
             result = r
             latch.countDown()
         }
 
-        idleLooperUntilLatch(latch)
+        idleMainLooperUntil(latch)
+
+        assertTrue(result!!.isFailure)
+        // The attempt was recorded, but completion is NOT consumed on failure —
+        // so the next launch retries instead of returning a stale null.
+        assertTrue(storage.deferredCheckAttempted)
+        assertFalse(storage.deferredCheckCompleted)
+    }
+
+    @Test
+    fun `referrer reader failure falls back to fingerprint`() {
+        val latch = CountDownLatch(1)
+        var result: Result<WarpLinkDeepLink?>? = null
+        val apiClient = ApiClient(API_KEY, "http://localhost:1")
+        val fingerprintCollector = FingerprintCollector()
+        val referrerReader = InstallReferrerReader(context)
+
+        performDeferredCheck(
+            storage, fingerprintCollector, apiClient,
+            referrerReader, null,
+            settings = RetrySettings.NO_WAIT
+        ) { r ->
+            result = r
+            latch.countDown()
+        }
+
+        idleMainLooperUntil(latch)
 
         // Referrer fails in Robolectric (no Play Store),
         // falls back to fingerprint, then network error
         assertTrue(result!!.isFailure)
-    }
-
-    private fun idleLooperUntilLatch(
-        latch: CountDownLatch,
-        timeoutMs: Long = 10_000
-    ) {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        val looper = Shadows.shadowOf(Looper.getMainLooper())
-        while (latch.count > 0 &&
-            System.currentTimeMillis() < deadline
-        ) {
-            looper.idleFor(Duration.ofMillis(500))
-            latch.await(50, TimeUnit.MILLISECONDS)
-        }
-        looper.idle()
     }
 
     companion object {

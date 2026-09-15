@@ -15,7 +15,7 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-const val SDK_VERSION: String // "0.1.0"
+val SDK_VERSION: String // "1.1.0"
 ```
 
 The current SDK version string.
@@ -40,39 +40,38 @@ fun configure(
 )
 ```
 
-Configure the SDK with your API key. Must be called before any other SDK methods.
+Configure the SDK with your SDK key. Call once, typically in `Application.onCreate()`.
+
+The `apiKey` parameter takes an **SDK key**, created in the dashboard under **API Keys** > **SDK key**. An API key has the same shape but cannot record install attribution.
 
 **Parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `context` | `Context` | Android context (typically `Application`). The SDK retains `applicationContext` internally. |
-| `apiKey` | `String` | Your WarpLink API key (e.g., `wl_live_xxx...`). Must match the format `wl_live_` or `wl_test_` followed by 32 alphanumeric characters. |
-| `options` | `WarpLinkOptions` | Configuration overrides. Defaults to `WarpLinkOptions()`. |
+| `context` | `Context` | Android context (typically `Application`). The SDK retains `applicationContext` internally. An `Application` context is required for automatic cold-start handling. |
+| `apiKey` | `String` | Your WarpLink SDK key. Must match the format `wl_live_` or `wl_test_` followed by 32 alphanumeric characters. |
+| `options` | `WarpLinkOptions` | Configuration and the `onLink` callback. Defaults to `WarpLinkOptions()`. |
 
-**Throws:**
-
-- `WarpLinkError.InvalidApiKeyFormat` if the API key doesn't match the expected format.
+**Does not throw.**
+- A malformed SDK key does **not** throw. `configure()` logs a warning, dispatches `WarpLinkError.InvalidApiKeyFormat` to `options.onLink` (if provided), and leaves the SDK unconfigured (`isConfigured == false`). This makes it safe to call from `Application.onCreate()`.
 
 **Behavior:**
-- Validates API key format locally. Throws on invalid format (unlike iOS, which silently returns).
-- On valid format, initializes internal components and performs async server-side API key validation via `/sdk/validate`.
-- Server validation result is cached for 24 hours to avoid repeated network calls.
+- On a valid key, initializes internal components and performs async server-side validation via `/sdk/validate` (result cached 24 hours). The validation response also supplies verified custom link domains, which the SDK then resolves.
+- If `options.automaticDeepLinks` is `true` (default) and the context is an `Application`, registers `ActivityLifecycleCallbacks` to resolve cold-start deep links and dispatch them to `onLink`. The same flag gates the warm-start path, so `onNewIntent` is a no-op when it is `false`.
+- If `options.automaticDeferredDeepLinks` is `true` (default), fires the first-launch deferred check and dispatches any match to `onLink`.
 
 **Example:**
 
 ```kotlin
-// Basic configuration
+// Opt-out model: one callback receives cold-start, warm-start, and deferred links
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_abcdefghijklmnopqrstuvwxyz012345"
-)
-
-// With options
-WarpLink.configure(
-    context = this,
-    apiKey = "wl_live_abcdefghijklmnopqrstuvwxyz012345",
-    options = WarpLinkOptions(debugLogging = true)
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
+    options = WarpLinkOptions(
+        onLink = { result ->
+            result.onSuccess { link -> router.handle(link) }
+        }
+    )
 )
 ```
 
@@ -87,7 +86,7 @@ fun handleDeepLink(
 )
 ```
 
-Handle an incoming App Link URI and resolve it to a deep link.
+Resolve an App Link URI to a deep link. Optional in the opt-out model (cold start is automatic via `configure`); use it for manual integrations or when `automaticDeepLinks = false`. Deduped against automatic dispatch of the same URI.
 
 **Parameters:**
 
@@ -100,9 +99,10 @@ Handle an incoming App Link URI and resolve it to a deep link.
 - `WarpLinkError.NotConfigured` — SDK not configured yet
 - `WarpLinkError.InvalidUrl` — URI is not a recognized WarpLink domain (`aplnk.to`)
 - `WarpLinkError.LinkNotFound` — Link does not exist or is inactive
+- `WarpLinkError.PasswordRequired`: Link is password protected, so it resolves to nothing
 - `WarpLinkError.NetworkError(cause)` — Network request failed
 - `WarpLinkError.ServerError(statusCode, message)` — API returned an error
-- `WarpLinkError.InvalidApiKey` — API key rejected by server
+- `WarpLinkError.InvalidApiKey`: SDK key rejected by server
 - `WarpLinkError.DecodingError(cause)` — Response parsing failed
 
 **Example:**
@@ -126,6 +126,30 @@ intent?.data?.let { uri ->
 
 ---
 
+#### `onNewIntent(intent)`
+
+```kotlin
+fun onNewIntent(intent: Intent)
+```
+
+Warm-start bridge for the automatic model. Call from your Activity's `onNewIntent` so links that arrive while your task is already running reach `onLink`. This one line is unavoidable: `ActivityLifecycleCallbacks` has no new-intent hook.
+
+**Requirements:**
+- An `onLink` callback must be configured (otherwise this is a no-op).
+- `options.automaticDeepLinks` must be `true`, which is the default. With it set to `false` this is a no-op and you route warm start yourself with `handleDeepLink`, the same way you route cold start.
+- The Activity should use `android:launchMode="singleTask"` (or `singleTop`) so warm-start intents are delivered to the existing task.
+
+**Example:**
+
+```kotlin
+override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    WarpLink.onNewIntent(intent)
+}
+```
+
+---
+
 #### `checkDeferredDeepLink(callback)`
 
 ```kotlin
@@ -143,15 +167,16 @@ Check for a deferred deep link on first launch. Returns `null` in the success ca
 | `callback` | `(Result<WarpLinkDeepLink?>) -> Unit` | Called with the matched deep link (or `null` if no match), or an error. **Always called on the main thread.** |
 
 **Behavior:**
+- Fires automatically from `configure()` when `automaticDeferredDeepLinks = true` (the default); call it directly only when you have disabled that flag.
 - On first launch: reads Play Install Referrer (deterministic), then falls back to fingerprint matching (probabilistic). Sends device signals to the attribution API and returns the match result.
-- On subsequent launches: returns the cached result from SharedPreferences without a network call.
-- The matched deep link has `isDeferred = true` and includes `matchType` and `matchConfidence`.
+- Completion is recorded only on a definitive server response, so an offline first launch retries next launch. Once complete, subsequent launches return the cached result with no network call. The completion marker is stored in `noBackupFilesDir`, so a reinstall re-runs the check.
+- The matched deep link has `isDeferred = true` and includes `matchType`, `matchConfidence`, and `matchGuaranteed`.
 
 **Errors (returned via `Result.failure`):**
 - `WarpLinkError.NotConfigured` — SDK not configured yet
 - `WarpLinkError.NetworkError(cause)` — Network request failed
 - `WarpLinkError.ServerError(statusCode, message)` — API returned an error
-- `WarpLinkError.InvalidApiKey` — API key rejected by server
+- `WarpLinkError.InvalidApiKey`: SDK key rejected by server
 - `WarpLinkError.DecodingError(cause)` — Response parsing failed
 
 **Example:**
@@ -175,13 +200,16 @@ WarpLink.checkDeferredDeepLink { result ->
 
 ## WarpLinkOptions
 
-Configuration options for the SDK.
+Configuration options and the single link callback. The SDK is opt-out: the automatic flags default to `true`.
 
 ```kotlin
 data class WarpLinkOptions(
     val apiEndpoint: String = "https://api.warplink.app/v1",
     val debugLogging: Boolean = false,
-    val matchWindowHours: Int = 72
+    val automaticDeepLinks: Boolean = true,
+    val automaticDeferredDeepLinks: Boolean = true,
+    val linkDomains: List<String> = emptyList(),
+    val onLink: ((Result<WarpLinkDeepLink>) -> Unit)? = null
 )
 ```
 
@@ -190,23 +218,68 @@ data class WarpLinkOptions(
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `apiEndpoint` | `String` | `"https://api.warplink.app/v1"` | The API endpoint URL. Override for testing or custom deployments. |
-| `debugLogging` | `Boolean` | `false` | Enable debug logging with `WarpLink` tag in Logcat. |
-| `matchWindowHours` | `Int` | `72` | The match window in hours for deferred deep link attribution. |
+| `debugLogging` | `Boolean` | `false` | Enable debug logging with the `WarpLink` tag in Logcat. |
+| `automaticDeepLinks` | `Boolean` | `true` | Resolve incoming deep links and dispatch them to `onLink`: cold start via `ActivityLifecycleCallbacks`, warm start via `onNewIntent`. Set `false` to handle both yourself with `handleDeepLink`. |
+| `automaticDeferredDeepLinks` | `Boolean` | `true` | Auto-fire the first-launch deferred check and dispatch a match to `onLink`. Set `false` to call `checkDeferredDeepLink` yourself. |
+| `linkDomains` | `List<String>` | `emptyList()` | Your verified custom link domains, for example `listOf("links.yourapp.com")`. Optional. Declaring them makes them recognized from the first line of `configure()`, before `/sdk/validate` answers, which is what a link opened on a first launch needs. Full URLs are accepted and reduced to their host. See [Custom link domains](#custom-link-domains). |
+| `onLink` | `((Result<WarpLinkDeepLink>) -> Unit)?` | `null` | Single sink for cold-start, warm-start, and deferred matches (disambiguate deferred via `WarpLinkDeepLink.isDeferred`). A deferred no-match is not dispatched. Failures are delivered as `Result.failure`. Invoked on the main thread. |
 
 **Example:**
 
 ```kotlin
-// Default options
-val options = WarpLinkOptions()
-
-// Custom options
+// Opt-out model
 val options = WarpLinkOptions(
-    debugLogging = true,
-    matchWindowHours = 48
+    onLink = { result -> result.onSuccess { link -> router.handle(link) } }
 )
 
-WarpLink.configure(context = this, apiKey = "wl_live_...", options = options)
+// Manual: disable automatic handling
+val manual = WarpLinkOptions(
+    debugLogging = true,
+    automaticDeepLinks = false,
+    automaticDeferredDeepLinks = false
+)
+
+WarpLink.configure(
+    context = this,
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
+    options = options
+)
 ```
+
+> **Removed in 1.1.0:** `matchWindowHours`. The match window is server-authoritative (set per link); the client option was inert.
+
+### Custom link domains
+
+The SDK always recognizes `aplnk.to`. It also loads the domains your organization has verified from `/sdk/validate` and caches them, so a custom domain works from the second launch onward with no extra setup.
+
+Declaring your domains locally covers the first launch as well. `handleDeepLink` and the automatic handling both have to answer "is this link mine" the moment the intent arrives, and on a genuinely first launch (or any launch with no network) no server answer exists yet. Without a local declaration, a custom-domain link on that launch is handed back to your app unresolved.
+
+Declare them either way, whichever suits your project. Both are read at `configure()` and the results are unioned, so you can use both.
+
+In code:
+
+```kotlin
+WarpLink.configure(
+    context = this,
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
+    options = WarpLinkOptions(
+        linkDomains = listOf("links.yourapp.com", "go.yourapp.com"),
+        onLink = { result -> /* ... */ }
+    )
+)
+```
+
+Or in `AndroidManifest.xml`, inside `<application>`, as a comma separated list:
+
+```xml
+<meta-data
+    android:name="app.warplink.DOMAINS"
+    android:value="links.yourapp.com,go.yourapp.com" />
+```
+
+Values are normalized for you: whitespace and letter case do not matter, and a full URL is reduced to its host, so `https://links.yourapp.com/` and `links.yourapp.com` are the same declaration. `www.` is never stripped, since it is a different host.
+
+Declaring a domain does not replace verifying it. It tells the SDK which links are its own; the domain still has to be verified and live in your dashboard, and still needs its own `<data>` host in your App Links intent filter.
 
 ---
 
@@ -222,7 +295,8 @@ data class WarpLinkDeepLink(
     val customParams: Map<String, Any> = emptyMap(),
     val isDeferred: Boolean = false,
     val matchType: MatchType? = null,
-    val matchConfidence: Double? = null
+    val matchConfidence: Double? = null,
+    val matchGuaranteed: Boolean = false
 )
 ```
 
@@ -237,6 +311,7 @@ data class WarpLinkDeepLink(
 | `isDeferred` | `Boolean` | Whether this deep link was resolved via deferred attribution. |
 | `matchType` | `MatchType?` | The type of attribution match (`DETERMINISTIC` or `PROBABILISTIC`). |
 | `matchConfidence` | `Double?` | The confidence score of the attribution match (0.0 to 1.0). |
+| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Gate anything sensitive (auto sign-in, showing personal data) on this rather than on a confidence threshold: a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. |
 
 ### Working with `customParams`
 
@@ -274,8 +349,8 @@ enum class MatchType {
 
 | Value | Description |
 |-------|-------------|
-| `DETERMINISTIC` | Matched via Play Install Referrer. Confidence is always 1.0. |
-| `PROBABILISTIC` | Matched via enriched fingerprint. Confidence varies by time window (0.40–0.85). |
+| `DETERMINISTIC` | Matched via Play Install Referrer. Confidence is always 1.0 and `matchGuaranteed` is `true`. |
+| `PROBABILISTIC` | Matched via fingerprint. Confidence varies by time window (0.20 to 0.85), reduced further when the fingerprint bucket was ambiguous or the click IP was widely shared. `matchGuaranteed` is always `false`. |
 
 See [Attribution](attribution.md) for details on confidence scores.
 
@@ -297,12 +372,13 @@ sealed class WarpLinkError(
 | Subclass | Description |
 |----------|-------------|
 | `NotConfigured` | SDK used before `configure()` was called. |
-| `InvalidApiKeyFormat` | API key format is invalid (must be `wl_live_` or `wl_test_` + 32 alphanumeric characters). **Thrown by `configure()`.** |
-| `InvalidApiKey` | API key was rejected by the server (revoked or incorrect). |
+| `InvalidApiKeyFormat` | SDK key format is invalid (must be `wl_live_` or `wl_test_` + 32 alphanumeric characters). Reported to `onLink` and logged; `configure()` does **not** throw. |
+| `InvalidApiKey` | SDK key was rejected by the server. It was revoked, mistyped, or is an API key. |
 | `NetworkError(cause: Throwable)` | Network request failed with an underlying cause. |
 | `ServerError(statusCode: Int, message: String)` | API returned an error response. |
-| `InvalidUrl` | The URI is not a valid WarpLink App Link (not an `aplnk.to` domain). |
+| `InvalidUrl` | The URI is not a recognized WarpLink App Link (host is not `aplnk.to` or a verified custom domain). |
 | `LinkNotFound` | The link was not found (404) or is no longer active. |
+| `PasswordRequired` | The link is password protected, so it resolves to no destination and no platform URLs. |
 | `DecodingError(cause: Throwable)` | Response parsing failed. |
 
 Use exhaustive `when` for handling:
@@ -317,6 +393,7 @@ result.onFailure { error ->
         is WarpLinkError.ServerError -> { /* Log statusCode and message */ }
         is WarpLinkError.InvalidUrl -> { /* Not a WarpLink URL */ }
         is WarpLinkError.LinkNotFound -> { /* Check link in dashboard */ }
+        is WarpLinkError.PasswordRequired -> { /* Open the short URL in a browser */ }
         is WarpLinkError.DecodingError -> { /* Update SDK */ }
         else -> { /* Unknown error */ }
     }

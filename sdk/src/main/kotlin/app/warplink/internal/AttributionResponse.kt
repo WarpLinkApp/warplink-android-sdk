@@ -4,6 +4,7 @@ internal data class AttributionResponse(
     val matched: Boolean,
     val matchType: String?,
     val matchConfidence: Double?,
+    val matchGuaranteed: Boolean = false,
     val linkId: String?,
     val deepLinkUrl: String?,
     val destinationUrl: String?,

@@ -10,6 +10,15 @@ internal class Logger(private val debugEnabled: Boolean) {
         }
     }
 
+    /**
+     * Surface a developer-facing warning (e.g. an invalid API key). Always
+     * emitted, regardless of [debugEnabled], since these indicate a
+     * misconfiguration the developer must fix.
+     */
+    fun warn(message: String) {
+        Log.w(TAG, message)
+    }
+
     companion object {
         private const val TAG = "WarpLink"
 

@@ -6,15 +6,39 @@ import android.os.Looper
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
 
-internal class InstallReferrerReader(private val context: Context) {
+internal class InstallReferrerReader(
+    private val context: Context,
+    private val logger: Logger? = null,
+    /**
+     * Builds the Play client. Injectable because every branch below is a
+     * failure branch, and the real client needs a Play Store that no unit test
+     * has. Without this seam the only way to reach them is to stand up the real
+     * client under Robolectric, which never answers, costs minutes per test,
+     * and leaves a pending connection that slows every test after it.
+     */
+    private val clientFactory: (Context) -> InstallReferrerClient = {
+        InstallReferrerClient.newBuilder(it).build()
+    }
+) : ReferrerSource {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun readReferrer(callback: (Result<String?>) -> Unit) {
+    /**
+     * Referrer is Android's deterministic attribution path, and every way it
+     * can fail produces the same `null` an organic install produces. Naming
+     * the cause is the only way a developer can tell "no referrer" from
+     * "referrer never worked".
+     */
+    private fun degraded(cause: String) {
+        logger?.log("$LOG_PREFIX unavailable: $cause")
+    }
+
+    override fun readReferrer(callback: (Result<ReferrerRead?>) -> Unit) {
         val client: InstallReferrerClient
         try {
-            client = InstallReferrerClient.newBuilder(context).build()
-        } catch (_: Exception) {
+            client = clientFactory(context)
+        } catch (e: Exception) {
+            degraded("client could not be built (${e.javaClass.simpleName})")
             callback(Result.success(null))
             return
         }
@@ -27,6 +51,7 @@ internal class InstallReferrerReader(private val context: Context) {
                 if (callbackInvoked) return@Runnable
                 callbackInvoked = true
             }
+            degraded("Play Store did not respond within ${TIMEOUT_MS}ms")
             safeEndConnection(client)
             callback(Result.success(null))
         }
@@ -44,12 +69,12 @@ internal class InstallReferrerReader(private val context: Context) {
                             if (callbackInvoked) return
                             callbackInvoked = true
                         }
-                        val linkId = handleResponse(
+                        val read = handleResponse(
                             responseCode, client
                         )
                         safeEndConnection(client)
                         mainHandler.post {
-                            callback(Result.success(linkId))
+                            callback(Result.success(read))
                         }
                     }
 
@@ -59,18 +84,20 @@ internal class InstallReferrerReader(private val context: Context) {
                             if (callbackInvoked) return
                             callbackInvoked = true
                         }
+                        degraded("service disconnected before responding")
                         mainHandler.post {
                             callback(Result.success(null))
                         }
                     }
                 }
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             mainHandler.removeCallbacks(timeoutRunnable)
             synchronized(lock) {
                 if (callbackInvoked) return
                 callbackInvoked = true
             }
+            degraded("connection could not be started (${e.javaClass.simpleName})")
             safeEndConnection(client)
             callback(Result.success(null))
         }
@@ -79,14 +106,23 @@ internal class InstallReferrerReader(private val context: Context) {
     private fun handleResponse(
         responseCode: Int,
         client: InstallReferrerClient
-    ): String? {
+    ): ReferrerRead? {
         if (responseCode != InstallReferrerClient.InstallReferrerResponse.OK) {
+            degraded(InstallReferrerResponseCodes.describe(responseCode))
             return null
         }
         return try {
-            val referrer = client.installReferrer.installReferrer
-            parseWarpLinkReferrer(referrer)
-        } catch (_: Exception) {
+            val details = client.installReferrer
+            val linkId = parseWarpLinkReferrer(details.installReferrer)
+            // A referrer that is present but not ours is the ordinary organic
+            // case, so it is reported as normal rather than as degraded.
+            logger?.log(
+                if (linkId == null) "$LOG_PREFIX carried no WarpLink link id"
+                else "$LOG_PREFIX matched link $linkId"
+            )
+            linkId?.let { ReferrerRead(it, details.installBeginTimestampSeconds) }
+        } catch (e: Exception) {
+            degraded("referrer could not be read (${e.javaClass.simpleName})")
             null
         }
     }
@@ -101,6 +137,8 @@ internal class InstallReferrerReader(private val context: Context) {
 
     companion object {
         private const val TIMEOUT_MS = 2000L
+        private const val LOG_PREFIX = "Install referrer"
+
         private val UUID_REGEX = Regex(
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}" +
                 "-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",

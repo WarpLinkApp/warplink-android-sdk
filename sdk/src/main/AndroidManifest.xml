@@ -1,1 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required: the SDK resolves links and attribution over HTTPS. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

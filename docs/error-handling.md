@@ -17,7 +17,7 @@ class MyApp : Application() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_YOUR_KEY"
+            apiKey = "wl_live_yoursdkkeyhere000000000000000000"
         )
     }
 }
@@ -27,30 +27,41 @@ class MyApp : Application() {
 
 ### `InvalidApiKeyFormat`
 
-**When:** The API key passed to `configure()` does not match the expected format: `wl_live_` or `wl_test_` followed by exactly 32 alphanumeric characters.
+**When:** The SDK key passed to `configure()` does not match the expected format: `wl_live_` or `wl_test_` followed by exactly 32 alphanumeric characters.
 
-**Fix:** Verify your API key in the [WarpLink dashboard](https://warplink.app) under **Settings > API Keys**. Ensure you're copying the full key.
+**Fix:** Verify your SDK key in the [WarpLink dashboard](https://warplink.app) under **API Keys**. Ensure you're copying the full key.
 
-**Note:** Unlike the iOS SDK (which silently returns), the Android SDK **throws** `WarpLinkError.InvalidApiKeyFormat` from `configure()`. Wrap in a try-catch during development if needed:
+**Note:** `configure()` does **not** throw on a malformed key. It logs a warning, dispatches `WarpLinkError.InvalidApiKeyFormat` to `options.onLink` (if provided), and leaves the SDK unconfigured (`isConfigured == false`). This keeps a bad key from crashing `Application.onCreate()`. To surface it during development, read it from `onLink`:
 
 ```kotlin
-try {
-    WarpLink.configure(context = this, apiKey = apiKey)
-} catch (e: WarpLinkError.InvalidApiKeyFormat) {
-    Log.e("MyApp", "Invalid API key format: ${e.message}")
-}
+WarpLink.configure(
+    context = this,
+    apiKey = apiKey,
+    options = WarpLinkOptions(
+        onLink = { result ->
+            result.onFailure { error ->
+                if (error is WarpLinkError.InvalidApiKeyFormat) {
+                    Log.e("MyApp", "Invalid API key format: ${error.message}")
+                }
+            }
+        }
+    )
+)
 ```
 
 ---
 
 ### `InvalidApiKey`
 
-**When:** The server rejects the API key (HTTP 401 or 403). The key may be revoked, expired, or incorrect.
+**When:** The server rejects the key (HTTP 401 or 403). The key may be an API key rather than an SDK key, or it may be revoked, expired, or incorrect.
 
 **Fix:**
-1. Check that you're using the correct key (live vs. test)
-2. Verify the key is still active in the dashboard
-3. Generate a new key if the current one was revoked
+1. Confirm you are using an **SDK key**. Install attribution requires one, and an API key cannot record installs whatever scopes it holds. Create one at **API Keys** > **SDK key** and pass it to `WarpLink.configure()`
+2. Confirm the key string matches the dashboard value exactly. A key that is still well formed but altered by a typo or a stale build config passes the local format check and is rejected by the server
+3. Verify the key is still active in the dashboard
+4. Generate a new key if the current one was revoked
+
+**Telltale symptom:** deep links resolve normally and Logcat shows `API key validated successfully`, but the deferred check fails with `InvalidApiKey` and no installs appear in your dashboard. That is an API key in an SDK slot.
 
 ---
 
@@ -58,7 +69,11 @@ try {
 
 **When:** A network request fails — no internet connectivity, DNS resolution failure, or request timeout.
 
-**Fix:** Retry with exponential backoff. Check device connectivity before retrying.
+**Fix:** Check device connectivity and show an offline state. A retry loop of your own is not the first thing to reach for here, because the SDK has already run one.
+
+Before you see this, the SDK has already tried again. A resolve or a deferred check that fails on a dead or flaky connection, or with a 5xx, is attempted up to three times, with short waits between attempts. Every attempt has its own time limit, so one that hangs rather than fails cannot swallow the others, and the whole sequence is limited to about twelve seconds. The limit is enforced as total elapsed time as well as per attempt, so a server that answers very slowly, a byte at a time, cannot stretch a tap's resolution past it. A weak connection usually delivers on the second attempt, in about eight. By the time `NetworkError` reaches you, all of those attempts have failed. Refusals are never retried: a 404, a 403 and an expired link are answered on the first attempt, because the server will give the same answer to the second.
+
+A failed resolve also releases the SDK's duplicate-tap guard, so a user who taps the same link again straight away really re-resolves it rather than being handed the failure back.
 
 ```kotlin
 result.onFailure { error ->
@@ -80,8 +95,8 @@ result.onFailure { error ->
 
 | Status Code | Meaning | Action |
 |-------------|---------|--------|
-| 401 | Unauthorized | Check API key |
-| 403 | Forbidden | Check API key permissions |
+| 401 | Unauthorized | Check the key is active and correct |
+| 403 | Forbidden | A password protected link returns `PasswordRequired`, otherwise confirm it is an SDK key, not an API key |
 | 429 | Rate limited | Retry after delay |
 | 500 | Server error | Retry later, report if persistent |
 | 503 | Service unavailable | Retry later |
@@ -102,20 +117,9 @@ result.onFailure { error ->
 
 ### `InvalidUrl`
 
-**When:** A URI passed to `handleDeepLink()` is not a recognized WarpLink App Link. Currently, only the `aplnk.to` domain is recognized.
+**When:** A URI is not a recognized WarpLink App Link. Recognized hosts are `aplnk.to` plus any verified custom domains returned by `/sdk/validate`. Foreign URIs fail fast locally with `InvalidUrl` and never hit the network.
 
-**Fix:** Verify the URI host is `aplnk.to`. If you're using a custom domain, note that custom domain support in the SDK requires a future update.
-
-```kotlin
-// Only pass WarpLink URIs to handleDeepLink
-intent?.data?.let { uri ->
-    if (uri.host == "aplnk.to") {
-        WarpLink.handleDeepLink(uri) { result ->
-            // ...
-        }
-    }
-}
-```
+**Fix:** In the opt-out model you rarely see this: automatic handling ignores foreign URIs, so `onLink` only fires for real WarpLink links. If you call `handleDeepLink` manually, it is safe to pass any `intent.data`; foreign hosts simply return `InvalidUrl`. Custom domains resolve automatically once your SDK key validates (no manual allowlist needed).
 
 ---
 
@@ -127,6 +131,20 @@ intent?.data?.let { uri ->
 1. Verify the link exists in the [WarpLink dashboard](https://warplink.app)
 2. Check that the link is active (not expired or disabled)
 3. Ensure the slug in the URL matches
+
+---
+
+### `PasswordRequired`
+
+**When:** The link is password protected (HTTP 403). Resolving it returns no destination and no platform URLs, because the password is checked in the browser and the app never sees it.
+
+**Fix:** Open the short URL itself in a browser. The password form lives there, and a correct password redirects on to the destination.
+
+```kotlin
+is WarpLinkError.PasswordRequired -> {
+    startActivity(Intent(Intent.ACTION_VIEW, tappedUri))
+}
+```
 
 ---
 
@@ -161,7 +179,7 @@ fun handleWarpLinkError(error: Throwable) {
         }
         is WarpLinkError.ServerError -> {
             if (error.statusCode == 429) {
-                // Rate limited — back off
+                // Rate limited. Back off.
                 retryAfterDelay()
             } else {
                 showAlert("Server error. Please try again later.")
@@ -174,6 +192,10 @@ fun handleWarpLinkError(error: Throwable) {
         is WarpLinkError.LinkNotFound -> {
             // Link deleted or expired
             showAlert("This link is no longer available.")
+        }
+        is WarpLinkError.PasswordRequired -> {
+            // Password checked in the browser, never in the app
+            startActivity(Intent(Intent.ACTION_VIEW, tappedUri))
         }
         is WarpLinkError.DecodingError -> {
             // SDK may be outdated
@@ -202,7 +224,7 @@ Enable debug logging to see all SDK activity in Logcat:
 ```kotlin
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_YOUR_KEY",
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
     options = WarpLinkOptions(debugLogging = true)
 )
 ```

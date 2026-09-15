@@ -48,6 +48,22 @@ android {
     }
 }
 
+// Forward the loopback stub's answer delay into the test JVM.
+//
+// Gradle forks the unit tests, so a -D on the Gradle command line does not
+// reach them. Forwarded ONLY when it is actually set, so a normal run passes
+// no extra system property and is byte-identical to what it was before.
+//
+// Usage: ./gradlew :sdk:testDebugUnitTest -Dwarplink.test.loopbackDelayMs=300
+// See LoopbackJsonServer.answerDelayMs: it exists to prove the suite does not
+// depend on a fast socket. A failure under it is a broken test, and the delay
+// must never be raised or dropped to make one pass.
+tasks.withType<Test>().configureEach {
+    System.getProperty("warplink.test.loopbackDelayMs")?.let {
+        systemProperty("warplink.test.loopbackDelayMs", it)
+    }
+}
+
 dependencies {
     compileOnly("androidx.annotation:annotation:1.9.1")
     implementation("com.android.installreferrer:installreferrer:2.2")

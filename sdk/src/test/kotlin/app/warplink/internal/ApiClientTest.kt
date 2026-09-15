@@ -28,7 +28,7 @@ class ApiClientTest {
     fun `validateApiKey invokes callback with NetworkError`() {
         val client = ApiClient(apiKey, baseURL)
         val latch = CountDownLatch(1)
-        var result: Result<Boolean>? = null
+        var result: Result<ValidateResponse>? = null
 
         client.validateApiKey { r ->
             result = r
@@ -69,13 +69,10 @@ class ApiClientTest {
         var result: Result<AttributionResponse>? = null
         val signals = DeviceSignals(
             acceptLanguage = "en-US",
-            screenWidth = 1080,
-            screenHeight = 1920,
-            timezoneOffset = -300,
-            userAgent = "WarpLink-Android/0.1.0"
+            timezoneOffset = -300
         )
 
-        client.matchAttribution(signals, "0.1.0", null) { r ->
+        client.matchAttribution(signals, "1.1.0", null, isReinstall = false) { r ->
             result = r
             latch.countDown()
         }
@@ -95,13 +92,12 @@ class ApiClientTest {
         var result: Result<AttributionResponse>? = null
         val signals = DeviceSignals(
             acceptLanguage = "en-US",
-            screenWidth = 1080,
-            screenHeight = 1920,
-            timezoneOffset = -300,
-            userAgent = "WarpLink-Android/0.1.0"
+            timezoneOffset = -300
         )
 
-        client.matchAttribution(signals, "0.1.0", "device-123") { r ->
+        client.matchAttribution(
+            signals, "1.1.0", "device-123", isReinstall = false
+        ) { r ->
             result = r
             latch.countDown()
         }
@@ -122,7 +118,7 @@ class ApiClientTest {
         val linkId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
         client.matchAttribution(
-            null, "0.1.0", null, referrer = linkId
+            null, "0.1.0", null, referrer = linkId, isReinstall = false
         ) { r ->
             result = r
             latch.countDown()
@@ -143,15 +139,12 @@ class ApiClientTest {
         var result: Result<AttributionResponse>? = null
         val signals = DeviceSignals(
             acceptLanguage = "en-US",
-            screenWidth = 1080,
-            screenHeight = 1920,
-            timezoneOffset = -300,
-            userAgent = "WarpLink-Android/0.1.0"
+            timezoneOffset = -300
         )
         val linkId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
         client.matchAttribution(
-            signals, "0.1.0", null, referrer = linkId
+            signals, "1.1.0", null, referrer = linkId, isReinstall = false
         ) { r ->
             result = r
             latch.countDown()
@@ -164,4 +157,6 @@ class ApiClientTest {
         assertTrue(result!!.isFailure)
         assertIs<WarpLinkError.NetworkError>(result!!.exceptionOrNull())
     }
+
+
 }

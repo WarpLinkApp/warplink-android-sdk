@@ -3,7 +3,9 @@
 [![CI](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Deep linking SDK for Android. Handle App Links, deferred deep links, and install attribution with zero third-party dependencies.
+Deep linking, deferred deep linking, and install attribution for Android, with zero third-party dependencies.
+
+The SDK is **opt-out**: a single `configure(...)` call wires up cold-start deep links, the first-launch deferred check, and attribution automatically. Provide one `onLink` callback and you are done. Every piece can be disabled and driven manually if you prefer.
 
 ## Requirements
 
@@ -16,89 +18,127 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.0.2")
+    implementation("app.warplink:sdk:1.1.0")
 }
 ```
 
 ## Quick Start
 
-### 1. Configure the SDK
+### 1. Configure once, receive links in one place
 
-Initialize WarpLink in your `Application.onCreate()`:
+In your `Application.onCreate()`, call `configure` with an `onLink` callback. That callback receives cold-start, warm-start, and deferred matches. Nothing else is required. A **background deferred check that fails**, for example on a launch with no network, also reaches `onLink` as a failure. The gate stays open, so the next launch retries by itself, and the error is a report rather than something for the host to act on.
 
 ```kotlin
+import android.app.Application
+import app.warplink.WarpLink
+import app.warplink.WarpLinkOptions
+
 class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_your_api_key_here"
+            apiKey = "wl_live_yoursdkkeyhere000000000000000000",
+            options = WarpLinkOptions(
+                onLink = { result ->
+                    result.onSuccess { link ->
+                        // Route the user. link.isDeferred tells you whether this
+                        // came from a deferred install match.
+                        navigateTo(link.deepLinkUrl ?: link.destination)
+                    }.onFailure { error ->
+                        Log.w("MyApp", "WarpLink: ${error.message}")
+                    }
+                }
+            )
         )
     }
 }
 ```
 
-### 2. Add App Links Intent Filter
+Pass an **SDK key**, not an API key. SDK keys are created under **API Keys** > **SDK key** in the dashboard and are the only credential that can record install attribution. An API key resolves deep links but silently fails attribution.
 
-Add the following intent filter to your main Activity in `AndroidManifest.xml` so App Links open directly in your app:
+A malformed SDK key does **not** throw. It is reported to `onLink` (and logged), and the SDK stays unconfigured, so a bad key can never crash app startup.
+
+### 2. Add the App Links intent filter
+
+Add this to your entry Activity in `AndroidManifest.xml` so links open your app directly:
 
 ```xml
 <intent-filter android:autoVerify="true">
     <action android:name="android.intent.action.VIEW" />
     <category android:name="android.intent.category.DEFAULT" />
     <category android:name="android.intent.category.BROWSABLE" />
-    <data
-        android:scheme="https"
-        android:host="aplnk.to" />
+    <data android:scheme="https" android:host="aplnk.to" />
 </intent-filter>
 ```
 
-### 3. Handle Deep Links
+### 3. Add the one warm-start line
 
-In your Activity, handle incoming deep links:
+Cold start is automatic. Warm start (a link arriving while your task is already running) is the one thing Android cannot deliver automatically, so forward it in a single line. Give the Activity `android:launchMode="singleTask"` (or `singleTop`) and:
 
 ```kotlin
-override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-
-    intent?.data?.let { uri ->
-        WarpLink.handleDeepLink(uri) { result ->
-            result.onSuccess { deepLink ->
-                // Navigate to deepLink.destination
-            }.onFailure { error ->
-                // Handle error
-            }
-        }
-    }
+override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    WarpLink.onNewIntent(intent) // dispatches to your onLink callback
 }
 ```
 
-### 4. Check for Deferred Deep Links
+This forward is gated by `automaticDeepLinks`. Leave that option at its
+default and the forward works. Set it to `false` and this line becomes a
+no-op, because you have taken over routing with `handleDeepLink`.
 
-On first launch, check if the user arrived via a deferred deep link:
+That's the whole integration. Deep links, deferred deep links, and attribution now work.
 
-```kotlin
-WarpLink.checkDeferredDeepLink { result ->
-    result.onSuccess { deepLink ->
-        deepLink?.let {
-            // Navigate to deferred deep link destination
-        }
-    }
-}
-```
+## Disabling any piece
 
-## Configuration Options
+Each capability is a flag on `WarpLinkOptions`. Turn one off to handle it yourself with `WarpLink.handleDeepLink(uri) { ... }` or `WarpLink.checkDeferredDeepLink { ... }`.
 
 ```kotlin
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_your_api_key_here",
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
     options = WarpLinkOptions(
-        debugLogging = true,       // Enable debug logging (default: false)
-        matchWindowHours = 48      // Attribution match window (default: 72)
+        debugLogging = true,               // WarpLink-tagged Logcat output
+        automaticDeepLinks = false,        // opt out of cold and warm start auto-handling
+        automaticDeferredDeepLinks = false // opt out of the auto deferred check
     )
 )
 ```
+
+### Checking a URI before you route it
+
+If your app has its own router and forwards every incoming URI, ask whether a URI is a WarpLink link before you hand it anywhere:
+
+```kotlin
+if (WarpLink.isWarpLinkUri(uri)) {
+    WarpLink.handleDeepLink(uri) { result -> /* ... */ }
+} else {
+    myRouter.handle(uri)
+}
+```
+
+`isWarpLinkUri(uri)` is the same check the automatic path makes: a host in the known link-domain set, and a path that carries a slug. It resolves nothing and touches no network, so it is safe to call on every URI. Before `configure()` the known set is `aplnk.to` alone, so a link on your own domain reads as `false` until you have declared it (see below) or the server has returned it.
+
+## Custom link domains
+
+`aplnk.to` works out of the box. If your links live on your own domain, declare it so it is recognized on the very first launch, before the SDK has talked to the server:
+
+```kotlin
+options = WarpLinkOptions(
+    linkDomains = listOf("links.yourapp.com"),
+    onLink = { result -> /* ... */ }
+)
+```
+
+Or declare it in `AndroidManifest.xml`, inside `<application>`, with no code change:
+
+```xml
+<meta-data
+    android:name="app.warplink.DOMAINS"
+    android:value="links.yourapp.com,go.yourapp.com" />
+```
+
+Both are optional and both are additive: your organization's verified domains still load from the server as before. See [Custom link domains](docs/api-reference.md#custom-link-domains).
 
 ## Documentation
 

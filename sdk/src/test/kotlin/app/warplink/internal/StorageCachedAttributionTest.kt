@@ -8,9 +8,11 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 class StorageCachedAttributionTest {
@@ -21,9 +23,8 @@ class StorageCachedAttributionTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        context.getSharedPreferences("warplink_prefs", Context.MODE_PRIVATE)
-            .edit().clear().commit()
         storage = Storage(context)
+        storage.clearAll()
     }
 
     @Test
@@ -146,10 +147,75 @@ class StorageCachedAttributionTest {
             isDeferred = true
         )
         storage.cachedAttribution = deepLink
-        storage.isFirstLaunch = false
+        storage.deferredCheckCompleted = true
         storage.clearCachedAttribution()
         assertNull(storage.cachedAttribution)
-        assertFalse(storage.isFirstLaunch)
+        assertTrue(storage.deferredCheckCompleted)
+    }
+
+    @Test
+    fun testDeferredCheckFlagsDefaultFalse() {
+        assertFalse(storage.deferredCheckAttempted)
+        assertFalse(storage.deferredCheckCompleted)
+    }
+
+    @Test
+    fun testDeferredCheckFlagsAreIndependent() {
+        // "attempted" tracks that a check started; "completed" is consumed only
+        // on a definitive server response. A failed attempt sets the former but
+        // not the latter, so the next launch retries.
+        storage.deferredCheckAttempted = true
+        assertTrue(storage.deferredCheckAttempted)
+        assertFalse(storage.deferredCheckCompleted)
+
+        storage.deferredCheckCompleted = true
+        assertTrue(storage.deferredCheckCompleted)
+    }
+
+    /**
+     * Android reports equal install timestamps for a fresh install and a later
+     * `lastUpdateTime` for an in-place upgrade. Storage reads them once, at
+     * construction, so set them before building the instance under test.
+     */
+    private fun setInstallTimes(firstInstall: Long, lastUpdate: Long) {
+        val info = Shadows.shadowOf(context.packageManager)
+            .getInternalMutablePackageInfo(context.packageName)
+        info.firstInstallTime = firstInstall
+        info.lastUpdateTime = lastUpdate
+    }
+
+    private fun writeLegacyConsumedFlag() {
+        context.getSharedPreferences("warplink_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("is_first_launch", false).commit()
+    }
+
+    @Test
+    fun `WL-S15 a restored 1_0_x flag never closes the gate, fresh install or upgrade`() {
+        // Auto Backup restores SharedPreferences, so both a fresh install and an
+        // in-place upgrade can arrive carrying a consumed 1.0.x flag. It proved
+        // only that a check began. Neither shape may close the gate: doing so
+        // skipped attribution permanently for whoever carried it.
+        storage.clearAll()
+        writeLegacyConsumedFlag()
+        setInstallTimes(firstInstall = 1_000L, lastUpdate = 1_000L)
+        assertFalse(Storage(context).deferredCheckCompleted)
+        setInstallTimes(firstInstall = 1_000L, lastUpdate = 5_000L)
+        assertFalse(Storage(context).deferredCheckCompleted)
+    }
+
+    @Test
+    fun testDeferredFlagsSurviveReinstantiation() {
+        storage.deferredCheckCompleted = true
+        assertTrue(Storage(context).deferredCheckCompleted)
+    }
+
+    @Test
+    fun testCachedDomainsRoundTrip() {
+        storage.cachedDomains = listOf("aplnk.to", "links.example.com")
+        assertEquals(
+            listOf("aplnk.to", "links.example.com"),
+            Storage(context).cachedDomains
+        )
     }
 
     @Test

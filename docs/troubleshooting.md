@@ -46,7 +46,7 @@ keytool -list -v -keystore ~/.android/debug.keystore \
 keytool -list -v -keystore your-release-key.keystore -alias your-alias
 ```
 
-Update the fingerprint in **Settings > Apps** in the WarpLink dashboard.
+Update the fingerprint under **Apps** in the WarpLink dashboard.
 
 ### App not registered in dashboard
 
@@ -54,7 +54,7 @@ Your Android app must be registered in the WarpLink dashboard with the correct p
 
 ### Domain mismatch
 
-The SDK only recognizes `aplnk.to` as a WarpLink domain. Custom domain support is planned for a future release.
+The SDK recognizes `aplnk.to`, any domain you declared locally, and any verified custom domain your org owns. Server-side domains are loaded automatically from `/sdk/validate` when your SDK key validates and are cached for offline launches. If a custom-domain link returns `InvalidUrl`, confirm the domain is verified and live in the dashboard, and declare it locally with `WarpLinkOptions.linkDomains` or the `app.warplink.DOMAINS` manifest entry so it is recognized on a first launch too.
 
 ---
 
@@ -99,7 +99,25 @@ adb shell pm verify-app-links --re-verify com.yourcompany.yourapp
 
 ---
 
-## 3. Play Install Referrer Not Working
+## 3. Deep Links Work but No Installs Appear
+
+**Symptoms:** Links open your app correctly, Logcat shows `API key validated successfully`, but the dashboard records no installs. The deferred check fails with `WarpLinkError.InvalidApiKey`.
+
+### An API key was passed to `configure()`
+
+This is the most common setup mistake. WarpLink issues two credentials that look identical (`wl_live_` plus 32 alphanumeric characters), and only an **SDK key** carries the `attribution:write` scope. An API key that holds `links:read` still passes `/sdk/validate` and still resolves deep links, so the integration looks healthy while every attribution call is rejected.
+
+Fix it in the dashboard:
+
+1. Go to **API Keys**
+2. Click **SDK key**, name it, and click **Create SDK Key**
+3. Replace the key in your `configure()` call
+
+There is no way to add attribution access to an existing API key. Create an SDK key instead.
+
+---
+
+## 4. Play Install Referrer Not Working
 
 **Symptoms:** Deferred deep links fall back to fingerprint matching instead of deterministic (Play Install Referrer) matching.
 
@@ -126,40 +144,15 @@ The SDK uses a 2-second timeout for the referrer read. On slow devices or when P
 
 ---
 
-## 4. SharedPreferences Persistence on Reinstall
+## 5. Reinstall Re-runs (or Skips) the Deferred Check
 
-**Symptoms:** `checkDeferredDeepLink` returns cached data after reinstalling the app, or reports "not first launch" on what should be a fresh install.
+**Symptoms:** After reinstalling, the deferred check behaves unexpectedly — either re-running or returning stale data.
 
-### Cause
+### How it works now
 
-Android Auto Backup (enabled by default) preserves SharedPreferences across uninstall/reinstall. The SDK's first-launch flag and cached attribution persist.
+The SDK stores its first-launch completion marker in the app's no-backup files directory (`noBackupFilesDir`). Android Auto Backup does not restore that directory, so a genuine reinstall is treated as a fresh first launch and re-runs attribution. **You do not need `android:allowBackup="false"` or custom backup rules for WarpLink.**
 
-### Fix
-
-Option A — Disable backup entirely:
-
-```xml
-<application
-    android:allowBackup="false"
-    ... >
-```
-
-Option B — Exclude WarpLink preferences from backup:
-
-```xml
-<!-- AndroidManifest.xml -->
-<application
-    android:fullBackupContent="@xml/backup_rules"
-    ... >
-```
-
-```xml
-<!-- res/xml/backup_rules.xml -->
-<full-backup-content>
-    <exclude domain="sharedpref"
-        path="warplink_prefs.xml" />
-</full-backup-content>
-```
+Cached attribution and the API-key validation timestamp remain in SharedPreferences; if a backup restores them, they are refreshed by the re-run check. The completion marker is what gates the network call, and it is never restored.
 
 ### Testing tip
 
@@ -171,53 +164,37 @@ adb shell pm clear com.yourcompany.yourapp
 
 ---
 
-## 5. Deep Link Returns `InvalidUrl`
+## 6. Deep Link Returns `InvalidUrl`
 
 **Symptoms:** `handleDeepLink` fails with `WarpLinkError.InvalidUrl` for URLs you expect to work.
 
-### URI is not an `aplnk.to` domain
+### URI host is not recognized
 
-The SDK currently only recognizes `aplnk.to` as a WarpLink domain. URIs with other hosts (including custom domains) will return `InvalidUrl`.
+The SDK recognizes `aplnk.to` plus any verified custom domains. A URI with an unrecognized host returns `InvalidUrl`. You do not need to pre-filter — foreign URIs are ignored by automatic handling and fail fast (no network) when passed to `handleDeepLink`.
 
-**Workaround:** Check the URI host before calling `handleDeepLink`:
+If your custom-domain link returns `InvalidUrl`, the domain list may not have loaded yet:
 
-```kotlin
-intent?.data?.let { uri ->
-    if (uri.host == "aplnk.to") {
-        WarpLink.handleDeepLink(uri) { result ->
-            // ...
-        }
-    }
-}
-```
-
-Custom domain support in the SDK is planned for a future release.
+- Confirm the domain is verified and live in the dashboard.
+- Declare the domain locally so it does not depend on a server response at all. Pass `WarpLinkOptions(linkDomains = listOf("links.yourapp.com"))`, or add `<meta-data android:name="app.warplink.DOMAINS" android:value="links.yourapp.com" />` inside `<application>`. This is the fix for a link that fails on a first launch and works on every launch after it, and for any launch with no network. Enable `debugLogging` and look for a `Link domains declared locally:` log line.
+- Ensure the SDK key has validated at least once (the server side of the list comes from `/sdk/validate` and is cached afterward). Enable `debugLogging` and look for a `Link domains loaded:` log line.
 
 ---
 
-## 6. Deferred Deep Link Returns Null
+## 7. Deferred Deep Link Returns Null
 
 **Symptoms:** `checkDeferredDeepLink` always returns `null` (success with no match).
 
 ### Match window expired
 
-If the user installs the app more than 72 hours (default) after clicking the link, the match window has expired. Consider increasing the window:
-
-```kotlin
-WarpLink.configure(
-    context = this,
-    apiKey = "wl_live_...",
-    options = WarpLinkOptions(matchWindowHours = 120)
-)
-```
+If the user installs the app after the link's match window, the click is no longer eligible. The window is server-authoritative (set per link in the dashboard, `match_window_hours`); there is no client-side option to tune it. Increase the window on the link if legitimate installs arrive later.
 
 ### Referrer unavailable and fingerprint didn't match
 
 On sideloaded apps or devices without Google Play, the SDK relies on fingerprint matching. If network conditions changed significantly between click and install (different Wi-Fi, VPN, etc.), the fingerprint may not match.
 
-### Not actually first launch
+### Check already completed
 
-SharedPreferences may have persisted from a previous install (see issue #4 above). Clear app data and try again.
+Once a definitive server response is recorded, the SDK returns the cached result without re-checking. For development, clear app data (`adb shell pm clear ...`) to force a fresh first launch.
 
 ### SDK not configured
 
@@ -225,7 +202,7 @@ If `configure()` hasn't been called, `checkDeferredDeepLink` returns `Result.fai
 
 ---
 
-## 7. adb Testing Commands
+## 8. adb Testing Commands
 
 ### Open a link directly
 
@@ -261,14 +238,14 @@ adb shell pm list packages | grep yourcompany
 
 ---
 
-## 8. Logcat Filtering
+## 9. Logcat Filtering
 
 ### Enable debug logging
 
 ```kotlin
 WarpLink.configure(
     context = this,
-    apiKey = "wl_live_YOUR_KEY",
+    apiKey = "wl_live_yoursdkkeyhere000000000000000000",
     options = WarpLinkOptions(debugLogging = true)
 )
 ```
@@ -282,31 +259,33 @@ adb logcat -s WarpLink
 ### What to look for
 
 **Configuration:**
-- `"Configured with API key: wl_live_****xxxx"` — SDK initialized (key is masked)
-- `"API endpoint: https://api.warplink.app/v1"` — endpoint in use
-- `"Match window: 72 hours"` — deferred deep link match window
-- `"WarpLink SDK configured (v0.1.0)"` — configuration complete
+- `"Configured with API key: "` followed by the masked key: SDK initialized
+- `"API endpoint: "` followed by the endpoint in use
+- `"WarpLink SDK configured (v"` followed by the version: configuration complete
 
 **API key validation:**
-- `"API key validated successfully"` — key is valid
-- `"API key validation cached, skipping"` — using cached validation (24hr)
-- `"API key validation failed: key rejected"` — key is invalid
+- `"API key validated successfully"`: key is valid
+- `"API key validation cached, skipping"`: using the cached validation (24 hours)
+- `"WarpLink API key was rejected by the server"`: key is invalid or revoked (always logged, even with debug logging off)
 
 **Deep links:**
-- `"Resolving deep link: abc123@aplnk.to"` — link resolution started
-- `"Deep link resolved: <linkId>"` — link resolved successfully
-- `"Deep link resolution failed: ..."` — resolution error
+- `"Resolving deep link: "` followed by slug@domain: resolution started
+- `"Deep link resolved: "` followed by the link id: resolved
+- `"Deep link resolution failed: "` followed by the reason
 
 **Deferred deep links:**
-- `"First launch detected"` — first launch, attribution check starting
-- `"Play Install Referrer: ..."` — referrer data read
-- `"Deferred deep link matched"` — attribution match found
-- `"No deferred deep link match"` — no match
-- `"Returning cached attribution"` — returning cached result
+- `"Retrying deferred check after a previous failed attempt"`: an earlier launch ran the check offline or got no definitive answer
+- `"First launch: trying Play Install Referrer"`: the deferred check is starting on the referrer path
+- `"First launch: collecting device signals"`: the deferred check is starting on the fingerprint path (no referrer reader)
+- `"Referrer found: "` followed by the link id: the Play Install Referrer named a WarpLink link
+- `"No WarpLink referrer, falling back to fingerprint"`: organic install, or the referrer was unavailable
+- `"Deferred deep link matched: "` followed by the link id: match found
+- `"No deferred deep link match"`: the server looked and found nothing
+- `"Deferred check already completed, returning cached attribution"`: returning the cached result
 
 ---
 
-## 9. ProGuard / R8
+## 10. ProGuard / R8
 
 The WarpLink SDK does not use reflection, so no ProGuard or R8 rules are needed. If you encounter issues with minification enabled, add:
 

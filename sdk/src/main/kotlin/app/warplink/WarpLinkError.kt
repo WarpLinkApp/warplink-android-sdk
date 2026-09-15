@@ -35,6 +35,15 @@ sealed class WarpLinkError(
         "The requested link was not found."
     )
 
+    /**
+     * The link is password protected, so resolving it returns no destination
+     * and no platform URLs. Send the user to the short URL in a browser, where
+     * the password form lives.
+     */
+    data object PasswordRequired : WarpLinkError(
+        "This link is password protected. Open it in a browser to enter the password."
+    )
+
     class DecodingError(cause: Throwable) : WarpLinkError(
         "Failed to decode server response: ${cause.localizedMessage}",
         cause

@@ -42,7 +42,7 @@ Recreate your Firebase Dynamic Links as WarpLink links via the [dashboard](https
 
 ```bash
 curl -X POST https://api.warplink.app/v1/links \
-  -H "Authorization: Bearer wl_live_YOUR_KEY" \
+  -H "Authorization: Bearer wl_live_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "destination_url": "https://yourapp.com/product/123",
@@ -80,11 +80,13 @@ import com.google.firebase.dynamiclinks.PendingDynamicLinkData
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.0.2")
+    implementation("app.warplink:sdk:1.1.0")
 }
 ```
 
 ## Step 3: Update SDK Initialization
+
+WarpLink requires a key here, and it must be an **SDK key**: create it in the dashboard under **API Keys** > **SDK key**. API keys are for backend scripts, CI, and AI agents, and they cannot record installs, so an API key pasted here resolves deep links but attributes nothing.
 
 **Firebase:**
 
@@ -103,7 +105,7 @@ class MyApp : Application() {
         super.onCreate()
         WarpLink.configure(
             context = this,
-            apiKey = "wl_live_YOUR_KEY"
+            apiKey = "wl_live_yoursdkkeyhere000000000000000000"
         )
     }
 }
@@ -247,9 +249,9 @@ WarpLink.checkDeferredDeepLink { result ->
 
 | | Firebase | WarpLink |
 |-|---------|----------|
-| When to call | Automatic via `getDynamicLink` | Explicit `checkDeferredDeepLink` call |
-| First launch detection | Built-in | SDK detects via SharedPreferences |
-| Caching | Automatic | Automatic (cached after first check) |
+| When to call | Automatic via `getDynamicLink` | Automatic via `onLink` (or explicit `checkDeferredDeepLink`) |
+| First launch detection | Built-in | Built-in (no-backup completion marker, reinstall-safe) |
+| Caching | Automatic | Automatic (cached after a definitive check) |
 | Attribution data | None | `matchType`, `matchConfidence` |
 | Matching method | Play Install Referrer | Play Install Referrer + fingerprint fallback |
 | Custom params | Via URL query params | `deepLink.customParams` map |
