@@ -1,9 +1,7 @@
 import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
-import com.vanniktech.maven.publish.SonatypeHost
 
 plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
     id("com.vanniktech.maven.publish")
 }
 
@@ -39,10 +37,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-    }
-
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
@@ -70,12 +64,12 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
-    testImplementation("org.robolectric:robolectric:4.14.1")
-    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test:core:1.7.0")
 }
 
 mavenPublishing {
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
+    publishToMavenCentral(automaticRelease = true)
     signAllPublications()
 
     configure(AndroidSingleVariantLibrary("release", sourcesJar = true, publishJavadocJar = true))
