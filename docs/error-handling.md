@@ -8,7 +8,7 @@ The WarpLink SDK uses the `WarpLinkError` sealed class for all error cases. Ever
 
 **When:** Any SDK method is called before `WarpLink.configure()`.
 
-**Fix:** Call `configure()` during app initialization — in your `Application.onCreate()`.
+**Fix:** Call `configure()` during app initialization, in your `Application.onCreate()`.
 
 ```kotlin
 // Ensure this runs before any handleDeepLink or checkDeferredDeepLink calls
@@ -67,7 +67,7 @@ WarpLink.configure(
 
 ### `NetworkError(cause: Throwable)`
 
-**When:** A network request fails — no internet connectivity, DNS resolution failure, or request timeout.
+**When:** A network request fails: no internet connectivity, DNS resolution failure, or request timeout.
 
 **Fix:** Check device connectivity and show an offline state. A retry loop of your own is not the first thing to reach for here, because the SDK has already run one.
 
@@ -162,11 +162,11 @@ is WarpLinkError.PasswordRequired -> {
 fun handleWarpLinkError(error: Throwable) {
     when (error) {
         is WarpLinkError.NotConfigured -> {
-            // Programming error — configure SDK earlier in app lifecycle
+            // Programming error: configure SDK earlier in app lifecycle
             throw IllegalStateException("WarpLink SDK not configured")
         }
         is WarpLinkError.InvalidApiKeyFormat -> {
-            // Programming error — check API key format
+            // Programming error: check API key format
             throw IllegalStateException("Invalid WarpLink API key format")
         }
         is WarpLinkError.InvalidApiKey -> {
@@ -186,7 +186,7 @@ fun handleWarpLinkError(error: Throwable) {
             }
         }
         is WarpLinkError.InvalidUrl -> {
-            // URL is not a WarpLink URL — ignore or log
+            // URL is not a WarpLink URL: ignore or log
             Log.w("MyApp", "Not a WarpLink URL")
         }
         is WarpLinkError.LinkNotFound -> {
@@ -237,6 +237,6 @@ adb logcat -s WarpLink
 
 ## Related Guides
 
-- [API Reference](api-reference.md) — `WarpLinkError` sealed class documentation
-- [Troubleshooting](troubleshooting.md) — common issues and solutions
-- [Integration Guide](integration-guide.md) — initial SDK setup
+- [API Reference](api-reference.md): `WarpLinkError` sealed class documentation
+- [Troubleshooting](troubleshooting.md): common issues and solutions
+- [Integration Guide](integration-guide.md): initial SDK setup

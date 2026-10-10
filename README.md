@@ -3,14 +3,14 @@
 [![CI](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/WarpLinkApp/warplink-android-sdk/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Deep linking, deferred deep linking, and install attribution for Android, with zero third-party dependencies.
+[WarpLink](https://warplink.app) gives your Android app deep linking, deferred deep linking, install attribution, and real-time analytics, with zero third-party dependencies.
 
 The SDK is **opt-out**: a single `configure(...)` call wires up cold-start deep links, the first-launch deferred check, and attribution automatically. Provide one `onLink` callback and you are done. Every piece can be disabled and driven manually if you prefer.
 
 ## Requirements
 
 - Android API 26+ (Android 8.0+)
-- Kotlin 1.8+
+- Kotlin 2.1+ and compileSdk 35+
 
 ## Installation
 
@@ -18,7 +18,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.1.0")
+    implementation("app.warplink:sdk:1.1.1")
 }
 ```
 
@@ -55,7 +55,7 @@ class MyApp : Application() {
 }
 ```
 
-Pass an **SDK key**, not an API key. SDK keys are created under **API Keys** > **SDK key** in the dashboard and are the only credential that can record install attribution. An API key resolves deep links but silently fails attribution.
+Pass an **SDK key**, not an API key. SDK keys are created under **Keys** > **SDK keys** in the dashboard and are the only credential that can record install attribution. An API key resolves deep links but silently fails attribution.
 
 A malformed SDK key does **not** throw. It is reported to `onLink` (and logged), and the SDK stays unconfigured, so a bad key can never crash app startup.
 
@@ -142,14 +142,14 @@ Both are optional and both are additive: your organization's verified domains st
 
 ## Documentation
 
-- [Integration Guide](docs/integration-guide.md) — step-by-step setup from account creation to testing
-- [API Reference](docs/api-reference.md) — all public types and methods
-- [Deferred Deep Links](docs/deferred-deep-links.md) — deferred attribution flow and edge cases
-- [Attribution](docs/attribution.md) — Play Install Referrer and fingerprint matching
-- [Error Handling](docs/error-handling.md) — every error case with recovery actions
-- [Architecture](docs/architecture.md) — how the SDK communicates with the platform
-- [Troubleshooting](docs/troubleshooting.md) — common issues and solutions
-- [Firebase Migration](docs/firebase-migration.md) — migrating from Firebase Dynamic Links
+- [Integration Guide](docs/integration-guide.md): step-by-step setup from account creation to testing
+- [API Reference](docs/api-reference.md): all public types and methods
+- [Deferred Deep Links](docs/deferred-deep-links.md): deferred attribution flow and edge cases
+- [Attribution](docs/attribution.md): Play Install Referrer and fingerprint matching
+- [Error Handling](docs/error-handling.md): every error case with recovery actions
+- [Architecture](docs/architecture.md): how the SDK communicates with WarpLink
+- [Troubleshooting](docs/troubleshooting.md): common issues and solutions
+- [Firebase Migration](docs/firebase-migration.md): migrating from Firebase Dynamic Links
 
 For hosted documentation, visit [warplink.app/docs](https://warplink.app/docs).
 

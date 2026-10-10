@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.1.1] - 2026-10-10
+
+### Changed
+
+- **Rate limits are retried once.** When the link resolve or the attribution
+  match answers `429` with a `Retry-After` of 5 seconds or less, the SDK waits
+  that long and sends the request one more time. With no readable `Retry-After`
+  it waits 1 second. A longer `Retry-After` is not retried. If the retry is also
+  refused, or the `Retry-After` is longer than 5 seconds, the call fails with
+  `WarpLinkError.ServerError` and `statusCode == 429`. The new
+  `retryAfterSeconds` property carries the server's `Retry-After` when it sent a
+  readable one. No new error class is added, so existing `when` expressions keep
+  compiling.
+
+### Clarification
+
+This corrects the 1.1.0 `matchGuaranteed` guidance below. `matchGuaranteed` is
+not a credential. Use it, like a confidence threshold, to pick the destination
+the attribution result routes to. A probabilistic match is a best guess from a
+fingerprint shaped by the network rather than the device, so it can name the
+wrong user. Do not sign anyone in, or show personal data, on this flag.
+Authenticate the user and check authorization separately.
+
+A deterministic match comes from the Play Install Referrer. A device ID lookup
+returns the install the device already has, with that install's own match type
+and confidence. It never turns a probabilistic match into a guaranteed one.
+
 ## [1.1.0] - 2026-09-15
 
 Opt-out release: a bare `configure()` now makes deep linking, deferred deep
@@ -19,9 +48,9 @@ all existing manual methods are preserved (additive, backward compatible).
   it to `false` and both paths become yours to route with `handleDeepLink`.
 - `WarpLinkOptions.automaticDeferredDeepLinks` (default `true`) auto-fires the
   first-launch deferred check.
-- `WarpLinkOptions.onLink` — a single sink that receives cold-start, warm-start,
+- `WarpLinkOptions.onLink`: a single sink that receives cold-start, warm-start,
   and deferred matches (disambiguate deferred via `WarpLinkDeepLink.isDeferred`).
-- `WarpLink.onNewIntent(intent)` — one-liner warm-start bridge (call it from your
+- `WarpLink.onNewIntent(intent)`: one-liner warm-start bridge (call it from your
   Activity's `onNewIntent`; the lifecycle callbacks have no new-intent hook).
 - The SDK now consumes the `domains` list from `/sdk/validate`, so verified
   custom domains resolve without a hardcoded `aplnk.to` allowlist.
@@ -79,7 +108,7 @@ all existing manual methods are preserved (additive, backward compatible).
 
 - `configure()` no longer throws on a malformed API key. It logs a warning,
   dispatches `WarpLinkError.InvalidApiKeyFormat` to `onLink`, and leaves the SDK
-  unconfigured — a bad key can no longer crash `Application.onCreate()`.
+  unconfigured. A bad key can no longer crash `Application.onCreate()`.
 - Attribution requests stop sending `user_agent` and screen dimensions. They
   never matched between the browser (click) and the native app (install), so the
   server dropped them from the fingerprint. The enriched body now carries only
@@ -94,6 +123,9 @@ all existing manual methods are preserved (additive, backward compatible).
   referrer, or a device-id match) and `false` for a probabilistic one. Gate
   auto-login, personal data, and anything else you cannot safely show the wrong
   person on this flag, not on the match alone.
+  **Correction:** this guidance was wrong. A device-ID lookup does not make a
+  match deterministic, and `matchGuaranteed` is not a credential. See
+  [1.1.1](#111---2026-10-10).
 - **Match window:** the deferred payload's default lifetime drops from 72 hours
   to 6, with a 24-hour ceiling. The probabilistic tier only. Deterministic
   matches are unaffected. A deferred link that is claimed more than 24 hours

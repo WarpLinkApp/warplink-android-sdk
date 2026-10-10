@@ -15,7 +15,7 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-val SDK_VERSION: String // "1.1.0"
+val SDK_VERSION: String // "1.1.1"
 ```
 
 The current SDK version string.
@@ -96,14 +96,14 @@ Resolve an App Link URI to a deep link. Optional in the opt-out model (cold star
 | `callback` | `(Result<WarpLinkDeepLink>) -> Unit` | Called with the resolved deep link or an error. **Always called on the main thread.** |
 
 **Errors (returned via `Result.failure`):**
-- `WarpLinkError.NotConfigured` — SDK not configured yet
-- `WarpLinkError.InvalidUrl` — URI is not a recognized WarpLink domain (`aplnk.to`)
-- `WarpLinkError.LinkNotFound` — Link does not exist or is inactive
+- `WarpLinkError.NotConfigured`: SDK not configured yet
+- `WarpLinkError.InvalidUrl`: URI is not a recognized WarpLink domain (`aplnk.to`)
+- `WarpLinkError.LinkNotFound`: Link does not exist or is inactive
 - `WarpLinkError.PasswordRequired`: Link is password protected, so it resolves to nothing
-- `WarpLinkError.NetworkError(cause)` — Network request failed
-- `WarpLinkError.ServerError(statusCode, message)` — API returned an error
+- `WarpLinkError.NetworkError(cause)`: Network request failed
+- `WarpLinkError.ServerError(statusCode, message)`: API returned an error
 - `WarpLinkError.InvalidApiKey`: SDK key rejected by server
-- `WarpLinkError.DecodingError(cause)` — Response parsing failed
+- `WarpLinkError.DecodingError(cause)`: Response parsing failed
 
 **Example:**
 
@@ -173,11 +173,11 @@ Check for a deferred deep link on first launch. Returns `null` in the success ca
 - The matched deep link has `isDeferred = true` and includes `matchType`, `matchConfidence`, and `matchGuaranteed`.
 
 **Errors (returned via `Result.failure`):**
-- `WarpLinkError.NotConfigured` — SDK not configured yet
-- `WarpLinkError.NetworkError(cause)` — Network request failed
-- `WarpLinkError.ServerError(statusCode, message)` — API returned an error
+- `WarpLinkError.NotConfigured`: SDK not configured yet
+- `WarpLinkError.NetworkError(cause)`: Network request failed
+- `WarpLinkError.ServerError(statusCode, message)`: API returned an error
 - `WarpLinkError.InvalidApiKey`: SDK key rejected by server
-- `WarpLinkError.DecodingError(cause)` — Response parsing failed
+- `WarpLinkError.DecodingError(cause)`: Response parsing failed
 
 **Example:**
 
@@ -311,7 +311,7 @@ data class WarpLinkDeepLink(
 | `isDeferred` | `Boolean` | Whether this deep link was resolved via deferred attribution. |
 | `matchType` | `MatchType?` | The type of attribution match (`DETERMINISTIC` or `PROBABILISTIC`). |
 | `matchConfidence` | `Double?` | The confidence score of the attribution match (0.0 to 1.0). |
-| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Gate anything sensitive (auto sign-in, showing personal data) on this rather than on a confidence threshold: a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. |
+| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. |
 
 ### Working with `customParams`
 

@@ -25,7 +25,20 @@ sealed class WarpLinkError(
     class ServerError(
         val statusCode: Int,
         override val message: String
-    ) : WarpLinkError("Server error ($statusCode): $message")
+    ) : WarpLinkError("Server error ($statusCode): $message") {
+
+        /**
+         * The server's `Retry-After` on a 429, when it sent a readable one.
+         * Null otherwise.
+         */
+        var retryAfterSeconds: Double? = null
+            private set
+
+        constructor(statusCode: Int, message: String, retryAfterSeconds: Double?) :
+            this(statusCode, message) {
+            this.retryAfterSeconds = retryAfterSeconds
+        }
+    }
 
     data object InvalidUrl : WarpLinkError(
         "The provided URL is not a valid WarpLink deep link."

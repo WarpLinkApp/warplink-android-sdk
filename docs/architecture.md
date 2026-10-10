@@ -1,15 +1,15 @@
 # Architecture Overview
 
-How the WarpLink Android SDK communicates with the WarpLink platform. This overview is aimed at SDK consumers — it explains the flows you need to understand, not internal infrastructure details.
+How the WarpLink Android SDK communicates with the WarpLink platform. This overview is aimed at SDK consumers. It explains the flows you need to understand, not internal infrastructure details.
 
 ## Link Creation
 
 Developers create links via the [WarpLink dashboard](https://warplink.app) or the [REST API](https://api.warplink.app/v1). Each link has:
 
 - A **short URL** (e.g., `https://aplnk.to/abc123`)
-- A **destination URL** — where the user should end up
+- A **destination URL**: where the user should end up
 - An optional **Android deep link URL** (e.g., `myapp://product/123`)
-- Optional **custom parameters** — arbitrary key-value data attached to the link
+- Optional **custom parameters**: arbitrary key-value data attached to the link
 
 When a link is created, it's stored in the database and cached at the edge for sub-10ms resolution globally. The `assetlinks.json` file is generated automatically for App Links verification.
 
@@ -88,9 +88,9 @@ User installs and opens the app
 When you call `WarpLink.configure(context, apiKey, options)`:
 
 1. **Format validation**: checks the SDK key matches `wl_live_` or `wl_test_` + 32 alphanumeric characters. On mismatch it does **not** throw: it logs a warning, dispatches `WarpLinkError.InvalidApiKeyFormat` to `onLink`, and leaves the SDK unconfigured.
-2. **Component setup** — creates internal API client, storage, fingerprint collector, install referrer reader, and logger. Retains `applicationContext` (not the provided context).
-3. **Server validation** — async call to `/sdk/validate` to verify the key is active and to load the org's usable link domains (so custom domains resolve). Successful validation is cached for 24 hours.
-4. **Automatic handling** — if enabled, registers `ActivityLifecycleCallbacks` for cold-start deep links and fires the first-launch deferred check, dispatching results to `onLink`.
+2. **Component setup**: creates internal API client, storage, fingerprint collector, install referrer reader, and logger. Retains `applicationContext` (not the provided context).
+3. **Server validation**: async call to `/sdk/validate` to verify the key is active and to load the org's usable link domains (so custom domains resolve). Successful validation is cached for 24 hours.
+4. **Automatic handling**: if enabled, registers `ActivityLifecycleCallbacks` for cold-start deep links and fires the first-launch deferred check, dispatching results to `onLink`.
 
 ### First Launch Detection
 
@@ -124,7 +124,7 @@ After a definitive deferred check, the result (match or confirmed no-match) is c
 
 ## Related Guides
 
-- [Deferred Deep Links](deferred-deep-links.md) — detailed deferred deep link flow
-- [Attribution](attribution.md) — matching tiers and confidence scores
-- [API Reference](api-reference.md) — all public types and methods
-- [Integration Guide](integration-guide.md) — initial SDK setup
+- [Deferred Deep Links](deferred-deep-links.md): detailed deferred deep link flow
+- [Attribution](attribution.md): matching tiers and confidence scores
+- [API Reference](api-reference.md): all public types and methods
+- [Integration Guide](integration-guide.md): initial SDK setup

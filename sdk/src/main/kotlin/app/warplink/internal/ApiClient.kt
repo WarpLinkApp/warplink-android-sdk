@@ -126,12 +126,7 @@ internal class ApiClient(
                         401 -> Result.failure(
                             WarpLinkError.InvalidApiKey
                         )
-                        else -> Result.failure(
-                            WarpLinkError.ServerError(
-                                conn.responseCode,
-                                "Unexpected status"
-                            )
-                        )
+                        else -> Result.failure(unexpectedStatus(conn))
                     }
                 } finally {
                     conn.disconnect()
@@ -205,12 +200,7 @@ internal class ApiClient(
                         401, 403 -> Result.failure(
                             WarpLinkError.InvalidApiKey
                         )
-                        else -> Result.failure(
-                            WarpLinkError.ServerError(
-                                conn.responseCode,
-                                "Unexpected status"
-                            )
-                        )
+                        else -> Result.failure(unexpectedStatus(conn))
                     }
                 } finally {
                     conn.disconnect()

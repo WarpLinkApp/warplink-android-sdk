@@ -9,7 +9,7 @@ With the opt-out model, this is automatic: `configure` fires the first-launch ch
 Standard App Links only work when the app is already installed. Deferred deep links solve the "click before install" problem:
 
 1. User clicks a WarpLink URL (e.g., a product share link)
-2. App is not installed — user is redirected to the Play Store
+2. App is not installed: user is redirected to the Play Store
 3. User installs the app
 4. On first launch, the SDK matches the install to the original click
 5. Your app routes the user to the intended content
@@ -84,7 +84,7 @@ The fingerprint rows are the ceilings for the zone-name variant that an SDK coll
 
 Elapsed time is not the only thing that moves a probabilistic score. Two multipliers reduce whichever ceiling applied: 0.6 when more than one distinct link shared the fingerprint, and 0.6 / 0.9 / 1.0 for a carrier-grade-NAT, household-IPv4, or IPv6 click address.
 
-**Recommendation:** Route to specific content when `matchConfidence` is above 0.5; show generic onboarding below 0.5. Gate anything sensitive on `matchGuaranteed` instead, which is `true` only for a deterministic match: a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. See [Attribution](attribution.md) for details.
+**Recommendation:** Route to specific content when `matchConfidence` is above 0.5; show generic onboarding below 0.5. `matchGuaranteed` is `true` only for a deterministic match; use it to pick the destination, not as a credential, since a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. See [Attribution](attribution.md) for details.
 
 ## Match Window
 
@@ -101,7 +101,7 @@ The deferred check runs exactly once per install and caches its outcome:
 - If the first attempt fails (for example, the device is offline), completion is **not** recorded, so the check retries on the next launch instead of returning a stale "no match".
 - Once complete, subsequent calls return the cached result with no network request.
 
-The completion marker is stored in the app's no-backup files directory, so an Android Auto Backup restore on reinstall does not carry it over — a genuine reinstall is treated as a fresh first launch and re-runs attribution.
+The completion marker is stored in the app's no-backup files directory, so an Android Auto Backup restore on reinstall does not carry it over. A genuine reinstall is treated as a fresh first launch and re-runs attribution.
 
 ## Edge Cases
 
@@ -117,7 +117,7 @@ In these cases the SDK transparently falls back to fingerprint matching (probabi
 
 ### Offline First Launch
 
-If there is no connectivity on first launch, the check fails with `WarpLinkError.NetworkError`. Because completion is consumed only on a definitive server response, the check automatically retries on the next launch once connectivity returns — the offline attempt is not lost.
+If there is no connectivity on first launch, the check fails with `WarpLinkError.NetworkError`. Because completion is consumed only on a definitive server response, the check automatically retries on the next launch once connectivity returns. The offline attempt is not lost.
 
 ### Reinstall Durability
 
@@ -131,7 +131,7 @@ The server matches against the newest entry your app is allowed to claim, and re
 
 ## Related Guides
 
-- [Attribution](attribution.md) — detailed explanation of matching tiers
-- [Error Handling](error-handling.md) — handling deferred deep link errors
-- [Troubleshooting](troubleshooting.md) — common deferred deep link issues
-- [Integration Guide](integration-guide.md) — initial SDK setup
+- [Attribution](attribution.md): detailed explanation of matching tiers
+- [Error Handling](error-handling.md): handling deferred deep link errors
+- [Troubleshooting](troubleshooting.md): common deferred deep link issues
+- [Integration Guide](integration-guide.md): initial SDK setup

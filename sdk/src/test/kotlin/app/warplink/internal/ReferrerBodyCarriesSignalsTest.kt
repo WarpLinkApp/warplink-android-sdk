@@ -104,7 +104,7 @@ class ReferrerBodyCarriesSignalsTest {
 
         val body = client.buildAttributionBody(
             DeviceSignals("en-US", -300, "America/Toronto"),
-            "1.1.0",
+            "1.1.1",
             null,
             LINK_ID
         )
@@ -126,7 +126,7 @@ class ReferrerBodyCarriesSignalsTest {
     fun `a referrer request with no signals still declares basic`() {
         val client = ApiClient(API_KEY, "http://localhost:1")
 
-        val body = client.buildAttributionBody(null, "1.1.0", null, LINK_ID)
+        val body = client.buildAttributionBody(null, "1.1.1", null, LINK_ID)
 
         // The honest case, and the reason the label is not simply hardcoded to
         // enriched: a caller with genuinely nothing to send must still satisfy

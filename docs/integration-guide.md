@@ -4,7 +4,7 @@ Step-by-step guide to integrate the WarpLink Android SDK. The SDK is opt-out: af
 
 ## Prerequisites
 
-- Android API 26+ (Android 8.0+), Kotlin 1.8+
+- Android API 26+ (Android 8.0+), Kotlin 2.1+, compileSdk 35+
 - A physical Android device recommended (App Links verification works best on real devices)
 
 ## Step 1: Create a WarpLink Account
@@ -17,7 +17,7 @@ Sign up at [warplink.app](https://warplink.app). The free tier includes 10,000 c
 2. Click **Register App** and select **Android**
 3. Fill in your app details:
    - **Package Name** (e.g., `com.yourcompany.yourapp`)
-   - **SHA256 Fingerprints** (from your signing key — see below)
+   - **SHA256 Fingerprints** (from your signing key, see below)
    - **Play Store URL** (or leave blank during development)
 4. Save the app. WarpLink generates the `assetlinks.json` file automatically for App Links verification.
 
@@ -54,7 +54,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.1.0")
+    implementation("app.warplink:sdk:1.1.1")
 }
 ```
 
@@ -262,9 +262,9 @@ curl -X POST https://api.warplink.app/v1/links \
 ### Testing Deferred Deep Links
 
 1. Uninstall your app from the test device
-2. Open the test link in Chrome — you'll be redirected to the Play Store (or a fallback URL during development)
+2. Open the test link in Chrome: you'll be redirected to the Play Store (or a fallback URL during development)
 3. Install the app via Android Studio (or `adb install`)
-4. Launch the app — the automatic deferred check dispatches the matched link to `onLink`
+4. Launch the app: the automatic deferred check dispatches the matched link to `onLink`
 
 ### Debugging Tips
 
@@ -276,10 +276,10 @@ curl -X POST https://api.warplink.app/v1/links \
 
 ## Next Steps
 
-- [API Reference](api-reference.md) — full documentation of all public types and methods
-- [Deferred Deep Links](deferred-deep-links.md) — how deferred attribution works on Android
-- [Attribution](attribution.md) — understanding confidence scores and match types
-- [Error Handling](error-handling.md) — how to handle every error case
-- [Architecture](architecture.md) — how the system works end-to-end
-- [Troubleshooting](troubleshooting.md) — solutions for common issues
-- [Firebase Migration](firebase-migration.md) — migrating from Firebase Dynamic Links
+- [API Reference](api-reference.md): full documentation of all public types and methods
+- [Deferred Deep Links](deferred-deep-links.md): how deferred attribution works on Android
+- [Attribution](attribution.md): understanding confidence scores and match types
+- [Error Handling](error-handling.md): how to handle every error case
+- [Architecture](architecture.md): how the system works end-to-end
+- [Troubleshooting](troubleshooting.md): solutions for common issues
+- [Firebase Migration](firebase-migration.md): migrating from Firebase Dynamic Links

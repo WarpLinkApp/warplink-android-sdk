@@ -53,37 +53,56 @@ internal class BoundedRetry(
         attempt: (Int, (Result<T>) -> Unit) -> Unit,
         deliver: (Result<T>) -> Unit,
     ) {
-        perform(1, elapsedMs(), attempt, deliver)
+        perform(1, elapsedMs(), false, attempt, deliver)
     }
 
     private fun <T> perform(
         number: Int,
         startedAt: Long,
+        rateLimitSpent: Boolean,
         attempt: (Int, (Result<T>) -> Unit) -> Unit,
         deliver: (Result<T>) -> Unit,
     ) {
         attempt(number) { result ->
-            val wait = nextWait(result, number, startedAt)
+            val wait = nextWait(result, number, startedAt, rateLimitSpent)
             if (wait == null) {
                 deliver(result)
                 return@attempt
             }
             scheduler.schedule(wait) {
                 if (!isCurrent()) deliver(result)
-                else perform(number + 1, startedAt, attempt, deliver)
+                else {
+                    val spent = rateLimitSpent || result.exceptionOrNull()?.let(RateLimit::isRateLimited) == true
+                    perform(number + 1, startedAt, spent, attempt, deliver)
+                }
             }
         }
     }
 
     /** The wait before the next attempt, or null when there must not be one. */
-    private fun <T> nextWait(result: Result<T>, number: Int, startedAt: Long): Long? {
+    private fun <T> nextWait(
+        result: Result<T>,
+        number: Int,
+        startedAt: Long,
+        rateLimitSpent: Boolean,
+    ): Long? {
         val error = result.exceptionOrNull() ?: return null
         if (!isCurrent()) return null
-        if (!isRetryable(error)) return null
+        // A 429 gets one retry per request, at any attempt, after the wait the
+        // server asked for. It is not `isRetryable`: the other 4xx refusals
+        // repeat, a rate limit lifts.
+        val rateLimited = RateLimit.isRateLimited(error)
+        if (!rateLimited && !isRetryable(error)) return null
         // The elapsed cap, not just the attempt count: readTimeout bounds the
         // gap between bytes rather than the response, so three attempts that
         // each crawl outlast any budget stated in attempts alone.
-        if (elapsedMs() - startedAt >= settings.totalBudgetMs) return null
+        val elapsed = elapsedMs() - startedAt
+        if (elapsed >= settings.totalBudgetMs) return null
+        if (rateLimited) {
+            if (rateLimitSpent || number >= settings.maxAttempts) return null
+            val wait = RateLimit.waitMs(error) ?: return null
+            return wait.takeIf { elapsed + it < settings.totalBudgetMs }
+        }
         // `maxAttempts` is the bound, and it is the only one. `delaysMs` is the
         // wait SCHEDULE: a run with more attempts than waits repeats the last
         // wait rather than stopping, so a constant named "max attempts" cannot

@@ -72,7 +72,7 @@ class ApiClientTest {
             timezoneOffset = -300
         )
 
-        client.matchAttribution(signals, "1.1.0", null, isReinstall = false) { r ->
+        client.matchAttribution(signals, "1.1.1", null, isReinstall = false) { r ->
             result = r
             latch.countDown()
         }
@@ -96,7 +96,7 @@ class ApiClientTest {
         )
 
         client.matchAttribution(
-            signals, "1.1.0", "device-123", isReinstall = false
+            signals, "1.1.1", "device-123", isReinstall = false
         ) { r ->
             result = r
             latch.countDown()
@@ -144,7 +144,7 @@ class ApiClientTest {
         val linkId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
         client.matchAttribution(
-            signals, "1.1.0", null, referrer = linkId, isReinstall = false
+            signals, "1.1.1", null, referrer = linkId, isReinstall = false
         ) { r ->
             result = r
             latch.countDown()

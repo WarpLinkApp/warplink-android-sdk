@@ -146,7 +146,7 @@ The SDK uses a 2-second timeout for the referrer read. On slow devices or when P
 
 ## 5. Reinstall Re-runs (or Skips) the Deferred Check
 
-**Symptoms:** After reinstalling, the deferred check behaves unexpectedly — either re-running or returning stale data.
+**Symptoms:** After reinstalling, the deferred check behaves unexpectedly: either re-running or returning stale data.
 
 ### How it works now
 
@@ -170,7 +170,7 @@ adb shell pm clear com.yourcompany.yourapp
 
 ### URI host is not recognized
 
-The SDK recognizes `aplnk.to` plus any verified custom domains. A URI with an unrecognized host returns `InvalidUrl`. You do not need to pre-filter — foreign URIs are ignored by automatic handling and fail fast (no network) when passed to `handleDeepLink`.
+The SDK recognizes `aplnk.to` plus any verified custom domains. A URI with an unrecognized host returns `InvalidUrl`. You do not need to pre-filter. Foreign URIs are ignored by automatic handling and fail fast (no network) when passed to `handleDeepLink`.
 
 If your custom-domain link returns `InvalidUrl`, the domain list may not have loaded yet:
 
@@ -297,7 +297,7 @@ However, this should not be necessary under normal circumstances.
 
 ## Related Guides
 
-- [Integration Guide](integration-guide.md) — step-by-step setup
-- [Error Handling](error-handling.md) — handling SDK errors programmatically
-- [Deferred Deep Links](deferred-deep-links.md) — understanding deferred attribution
-- [API Reference](api-reference.md) — all public types and methods
+- [Integration Guide](integration-guide.md): step-by-step setup
+- [Error Handling](error-handling.md): handling SDK errors programmatically
+- [Deferred Deep Links](deferred-deep-links.md): understanding deferred attribution
+- [API Reference](api-reference.md): all public types and methods

@@ -158,6 +158,29 @@ class ResolveRetryTest {
         }
     }
 
+    /**
+     * The permanent test address of an app host, `https://{handle}.aplnk.to/test`, is no link: the
+     * server answers the resolve with the ordinary not found. A phone with an updated build opens the
+     * app on it, so the SDK must treat that answer like any other not found: one request, one
+     * LinkNotFound, and never a retry or a link.
+     */
+    @Test
+    fun `the app host test address is answered not found once and never retried`() {
+        val server = LoopbackJsonServer(NOT_FOUND_JSON, status = 404).also { stubs.add(it) }
+        server.serveSequence(true, true, true)
+        UriParser.setDeclaredDomains(listOf("fampilot.aplnk.to"))
+        try {
+            val result = resolve(server, tapped = "https://fampilot.aplnk.to/test")
+
+            assertIs<WarpLinkError.LinkNotFound>(result.exceptionOrNull())
+            assertEquals(1, server.requestLines.size, "a not found must not be retried")
+            assertTrue(server.requestLines.single().contains("/links/resolve/test"))
+            assertTrue(server.requestLines.single().contains("domain=fampilot.aplnk.to"))
+        } finally {
+            UriParser.resetKnownDomains()
+        }
+    }
+
     @Test
     fun `the default settings still finish inside the budget`() {
         val server = stub()
@@ -262,6 +285,7 @@ class ResolveRetryTest {
     }
 
     private companion object {
+        const val NOT_FOUND_JSON = """{"error":{"code":"NOT_FOUND","message":"Link not found"}}"""
         const val RESOLVE_JSON =
             """{"id":"550e8400-e29b-41d4-a716-446655440000","slug":"abc123","domain":"aplnk.to","destination_url":"https://example.com","ios_url":null,"android_url":"myapp://android/42","custom_params":{},"created_at":"2026-01-01T00:00:00.000Z"}"""
     }

@@ -80,7 +80,7 @@ import com.google.firebase.dynamiclinks.PendingDynamicLinkData
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.1.0")
+    implementation("app.warplink:sdk:1.1.1")
 }
 ```
 
@@ -91,7 +91,7 @@ WarpLink requires a key here, and it must be an **SDK key**: create it in the da
 **Firebase:**
 
 ```kotlin
-// Firebase Dynamic Links doesn't require explicit initialization —
+// Firebase Dynamic Links doesn't require explicit initialization:
 // it initializes automatically via FirebaseApp.
 ```
 
@@ -237,7 +237,7 @@ WarpLink.checkDeferredDeepLink { result ->
         if (deepLink != null) {
             navigateTo(deepLink.destination)
         } else {
-            // No deferred deep link — show onboarding
+            // No deferred deep link: show onboarding
         }
     }.onFailure { error ->
         Log.e("MyApp", "Deferred error: ${error.message}")
@@ -260,21 +260,21 @@ WarpLink.checkDeferredDeepLink { result ->
 
 After migration, verify each flow works:
 
-- [ ] **SDK initializes** — enable `debugLogging` and check for `WarpLink SDK configured` in Logcat
-- [ ] **API key validates** — check for `API key validated successfully` in Logcat
-- [ ] **App Links open the app** — tap a WarpLink URL on a physical device
-- [ ] **App Links verified** — `adb shell pm get-app-links com.yourpackage` shows `verified`
-- [ ] **Deep link resolves** — `handleDeepLink` returns a `WarpLinkDeepLink` with the correct destination
-- [ ] **Custom parameters preserved** — check `deepLink.customParams` matches what you configured
-- [ ] **Deferred deep links work** — uninstall app, click link, reinstall, launch, verify `checkDeferredDeepLink` returns match
-- [ ] **assetlinks.json is correct** — `curl https://aplnk.to/.well-known/assetlinks.json` shows your package name and SHA256
-- [ ] **Error handling works** — test with an invalid URL, expired link, and no connectivity
-- [ ] **Old Firebase code fully removed** — no remaining Firebase Dynamic Links imports or dependencies
-- [ ] **Build succeeds** — clean build without Firebase Dynamic Links dependencies
+- [ ] **SDK initializes**: enable `debugLogging` and check for `WarpLink SDK configured` in Logcat
+- [ ] **API key validates**: check for `API key validated successfully` in Logcat
+- [ ] **App Links open the app**: tap a WarpLink URL on a physical device
+- [ ] **App Links verified**: `adb shell pm get-app-links com.yourpackage` shows `verified`
+- [ ] **Deep link resolves**: `handleDeepLink` returns a `WarpLinkDeepLink` with the correct destination
+- [ ] **Custom parameters preserved**: check `deepLink.customParams` matches what you configured
+- [ ] **Deferred deep links work**: uninstall app, click link, reinstall, launch, verify `checkDeferredDeepLink` returns match
+- [ ] **assetlinks.json is correct**: `curl https://aplnk.to/.well-known/assetlinks.json` shows your package name and SHA256
+- [ ] **Error handling works**: test with an invalid URL, expired link, and no connectivity
+- [ ] **Old Firebase code fully removed**: no remaining Firebase Dynamic Links imports or dependencies
+- [ ] **Build succeeds**: clean build without Firebase Dynamic Links dependencies
 
 ## Related Guides
 
-- [Integration Guide](integration-guide.md) — full setup walkthrough
-- [API Reference](api-reference.md) — all public types and methods
-- [Troubleshooting](troubleshooting.md) — common issues after migration
-- [Deferred Deep Links](deferred-deep-links.md) — understanding deferred attribution
+- [Integration Guide](integration-guide.md): full setup walkthrough
+- [API Reference](api-reference.md): all public types and methods
+- [Troubleshooting](troubleshooting.md): common issues after migration
+- [Deferred Deep Links](deferred-deep-links.md): understanding deferred attribution

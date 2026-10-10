@@ -34,7 +34,7 @@ When a user clicks a WarpLink URL and is redirected to the Play Store, the refer
 
 The SDK uses a 2-second timeout for the referrer read. If it expires (e.g., Google Play Services is slow), the SDK falls back to fingerprint matching.
 
-> **Note on device IDs:** iOS augments the deterministic path with the vendor identifier (IDFV). Android has no privacy-safe equivalent, so this SDK never sends a `device_id` and the Play Install Referrer is the deterministic path here. There is no GAID and no Android ID read anywhere in the SDK. The attribution payload does carry a `device_id` field, which the shared API schema defines for iOS; on Android it is always omitted.
+> **Note on device IDs:** iOS sends the vendor identifier (IDFV) only as a repeat check, never as a deterministic match. Android has no privacy-safe equivalent, so this SDK never sends a `device_id` and the Play Install Referrer is the only deterministic path. There is no GAID and no Android ID read anywhere in the SDK. The attribution payload does carry a `device_id` field, which the shared API schema defines for iOS; on Android it is always omitted.
 
 ## Probabilistic Matching (Enriched Fingerprint)
 
@@ -60,7 +60,7 @@ On first launch, if the referrer is unavailable, the SDK collects its device sig
 
 **On the zone name (new in 1.1.0).** The IANA zone name carries far more entropy than the offset it joins: roughly 340 zones against roughly 38 offsets. It also does not shift at a daylight-saving boundary, which used to break a click and its install apart when the clocks changed between them. The SDK sends both, and the server prefers the zone name (`fingerprint_version: enriched_tz`), falling back to the offset for SDKs that send no zone name. Collection never fails: if the zone cannot be resolved, it is omitted and the request still carries the language and the offset.
 
-**Not collected.** User-Agent and screen dimensions were removed from the fingerprint. They never matched between the browser (at click time) and the native app (at install time) — browser vs. native UA strings differ, and CSS pixels vs. physical pixels differ — so they only added noise. The IP address is derived server-side and is never sent by the SDK.
+**Not collected.** User-Agent and screen dimensions were removed from the fingerprint. They never matched between the browser (at click time) and the native app (at install time). Browser and native UA strings differ, and CSS pixels and physical pixels differ, so they only added noise. The IP address is derived server-side and is never sent by the SDK.
 
 ### Confidence by Time Window
 
@@ -125,18 +125,18 @@ never whether the install is attributed.
 
 The `WarpLinkDeepLink` returned via `onLink` (or `handleDeepLink` / `checkDeferredDeepLink`) includes:
 
-- `matchType: MatchType?` — `DETERMINISTIC` or `PROBABILISTIC`
-- `matchConfidence: Double?` — 0.0 to 1.0
+- `matchType: MatchType?`: `DETERMINISTIC` or `PROBABILISTIC`
+- `matchConfidence: Double?`: 0.0 to 1.0
 - `matchGuaranteed: Boolean`, `true` only for a deterministic match
-- `isDeferred: Boolean` — whether the link came from a deferred install match
+- `isDeferred: Boolean`: whether the link came from a deferred install match
 
-### Gate sensitive work on `matchGuaranteed`
+### `matchGuaranteed` Is Not a Credential
 
-`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Gate anything sensitive on it (auto sign-in, restoring an account, showing personal data) rather than on a confidence threshold. A probabilistic match is a best guess drawn from a network-shaped fingerprint, so even a high score can name the wrong user.
+`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Use it, like `matchConfidence`, to pick the destination to route to, not to authenticate the user. A probabilistic match is a best guess drawn from a network-shaped fingerprint, so even a high score can name the wrong user. Authenticate the user and check authorization separately before showing private data or doing anything sensitive, guaranteed match or not.
 
 ```kotlin
 if (link.matchGuaranteed) {
-    restoreAccount(link)      // this is the person we think it is
+    personalizeOnboarding(link)   // a reliable hint, not an identity
 } else {
     showContent(link)         // route content, but never identity
 }
@@ -147,9 +147,9 @@ if (link.matchGuaranteed) {
 | Confidence | Recommended Action |
 |------------|-------------------|
 | 1.0 (deterministic) | Route directly to content |
-| > 0.5 (probabilistic) | Route to content — high confidence |
+| > 0.5 (probabilistic) | Route to content, high confidence |
 | 0.3 to 0.5 | Show content with a confirmation (e.g., "Were you looking for...?") |
-| < 0.3 | Show generic onboarding — too uncertain |
+| < 0.3 | Show generic onboarding, too uncertain |
 
 ```kotlin
 WarpLink.configure(
@@ -175,7 +175,7 @@ WarpLink.configure(
 ### What the SDK Does NOT Collect
 
 - **No GAID** (Google Advertising ID)
-- **No Android ID** — the device's persistent identifier is not collected or sent
+- **No Android ID**: the device's persistent identifier is not collected or sent
 - **No location data**
 - **No contacts or personal data**
 - **No cross-app identifiers**
@@ -226,6 +226,6 @@ other SDK in it, not this one alone.
 
 ## Related Guides
 
-- [Deferred Deep Links](deferred-deep-links.md) — how deferred deep linking uses attribution
-- [API Reference](api-reference.md) — `MatchType` and `WarpLinkDeepLink` documentation
-- [Integration Guide](integration-guide.md) — initial SDK setup
+- [Deferred Deep Links](deferred-deep-links.md): how deferred deep linking uses attribution
+- [API Reference](api-reference.md): `MatchType` and `WarpLinkDeepLink` documentation
+- [Integration Guide](integration-guide.md): initial SDK setup

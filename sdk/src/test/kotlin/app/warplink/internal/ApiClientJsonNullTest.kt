@@ -60,7 +60,7 @@ class ApiClientJsonNullTest {
         var captured: AttributionResponse? = null
 
         clientFor(body).matchAttribution(
-            DeviceSignals("en-US", -300, "America/Toronto"), "1.1.0", null,
+            DeviceSignals("en-US", -300, "America/Toronto"), "1.1.1", null,
             isReinstall = false
         ) { r ->
             captured = r.getOrNull()
