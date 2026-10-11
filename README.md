@@ -26,7 +26,7 @@ dependencies {
 
 ### 1. Configure once, receive links in one place
 
-In your `Application.onCreate()`, call `configure` with an `onLink` callback. That callback receives cold-start, warm-start, and deferred matches. Nothing else is required. A **background deferred check that fails**, for example on a launch with no network, also reaches `onLink` as a failure. The gate stays open, so the next launch retries by itself, and the error is a report rather than something for the host to act on.
+In your `Application.onCreate()`, call `configure` with an `onLink` callback. That callback receives cold-start, warm-start, and deferred matches. Nothing else is required. A background deferred check that cannot finish, for example on a launch with no network, retries by itself on the next launch.
 
 ```kotlin
 import android.app.Application
@@ -57,7 +57,7 @@ class MyApp : Application() {
 
 Pass an **SDK key**, not an API key. SDK keys are created under **Keys** > **SDK keys** in the dashboard and are the only credential that can record install attribution. An API key resolves deep links but silently fails attribution.
 
-A malformed SDK key does **not** throw. It is reported to `onLink` (and logged), and the SDK stays unconfigured, so a bad key can never crash app startup.
+A malformed SDK key is reported to `onLink` without throwing.
 
 ### 2. Add the App Links intent filter
 
@@ -74,7 +74,7 @@ Add this to your entry Activity in `AndroidManifest.xml` so links open your app 
 
 ### 3. Add the one warm-start line
 
-Cold start is automatic. Warm start (a link arriving while your task is already running) is the one thing Android cannot deliver automatically, so forward it in a single line. Give the Activity `android:launchMode="singleTask"` (or `singleTop`) and:
+Cold start is automatic. Warm start (a link arriving while your task is already running) takes a single forwarding line. Give the Activity `android:launchMode="singleTask"` (or `singleTop`) and:
 
 ```kotlin
 override fun onNewIntent(intent: Intent) {
@@ -117,7 +117,7 @@ if (WarpLink.isWarpLinkUri(uri)) {
 }
 ```
 
-`isWarpLinkUri(uri)` is the same check the automatic path makes: a host in the known link-domain set, and a path that carries a slug. It resolves nothing and touches no network, so it is safe to call on every URI. Before `configure()` the known set is `aplnk.to` alone, so a link on your own domain reads as `false` until you have declared it (see below) or the server has returned it.
+`isWarpLinkUri(uri)` is the same check the automatic path makes: a host in the known link-domain set, and a path that carries a slug. It resolves nothing and touches no network, so it is safe to call on every URI. Declare your own link domain (see below) and `isWarpLinkUri` recognizes it from the first launch.
 
 ## Custom link domains
 
