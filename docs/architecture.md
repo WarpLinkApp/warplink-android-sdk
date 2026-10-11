@@ -25,7 +25,7 @@ User taps link
     → Real user on Android with app installed?
         → 302 redirect → Android App Links opens your app
     → Real user on Android without app?
-        → Captures fingerprint signals (IP, language, timezone)
+        → Captures match signals (IP, language, timezone)
         → Sets Play Install Referrer (utm_source=warplink&utm_content={link_id})
         → Redirects to Play Store (or fallback URL)
     → Other platform?
@@ -61,8 +61,8 @@ When a user clicks a link before the app is installed:
 
 ```
 User taps link (app not installed)
-    → Edge captures fingerprint signals (IP, language, timezone)
-    → Stores signals as a deferred payload (keyed by fingerprint)
+    → Edge captures match signals (IP, language, timezone)
+    → Stores signals as a deferred payload (keyed by match key)
     → Sets Play Install Referrer with WarpLink parameters
     → Redirects user to Play Store
 
@@ -74,8 +74,8 @@ User installs and opens the app
         → Deterministic match (confidence 1.0)
     → If referrer unavailable (sideloaded, no Play Services):
         → SDK sends accept_language + timezone offset to POST /attribution/match
-        → Server derives the IP and computes the fingerprint from both sides
-        → If fingerprint matches → probabilistic match (confidence 0.20 to 0.85 before multipliers)
+        → Server derives the IP and computes the match key from both sides
+        → If match key matches → probabilistic match (confidence 0.20 to 0.85 before multipliers)
     → SDK returns WarpLinkDeepLink with isDeferred = true (dispatched to onLink)
     → SDK records completion and caches the result
     → Your app routes the user to the intended content
@@ -88,7 +88,7 @@ User installs and opens the app
 When you call `WarpLink.configure(context, apiKey, options)`:
 
 1. **Format validation**: checks the SDK key matches `wl_live_` or `wl_test_` + 32 alphanumeric characters. On mismatch it does **not** throw: it logs a warning, dispatches `WarpLinkError.InvalidApiKeyFormat` to `onLink`, and leaves the SDK unconfigured.
-2. **Component setup**: creates internal API client, storage, fingerprint collector, install referrer reader, and logger. Retains `applicationContext` (not the provided context).
+2. **Component setup**: creates internal API client, storage, signal collector, install referrer reader, and logger. Retains `applicationContext` (not the provided context).
 3. **Server validation**: async call to `/sdk/validate` to verify the key is active and to load the org's usable link domains (so custom domains resolve). Successful validation is cached for 24 hours.
 4. **Automatic handling**: if enabled, registers `ActivityLifecycleCallbacks` for cold-start deep links and fires the first-launch deferred check, dispatching results to `onLink`.
 
@@ -106,7 +106,7 @@ On every attribution request, the Play Install Referrer path included, the SDK s
 | Timezone offset | `-(TimeZone.getDefault().getOffset(now) / 60000)` (minutes, JS convention, DST-aware) |
 | Timezone name | `ZoneId.systemDefault().id` (IANA, e.g. `America/Toronto`; omitted when the zone has no tzdb entry) |
 
-These raw signals are sent to the server, which derives the client IP and computes the fingerprint. The SDK does **not** hash or compute fingerprints locally, and does **not** send User-Agent or screen dimensions (they never matched browser vs. native app).
+These raw signals are sent to the server, which derives the client IP and computes the match key. The SDK does **not** hash or compute match keys locally, and does **not** send User-Agent or screen dimensions (they never matched browser vs. native app).
 
 ### Attribution Caching
 

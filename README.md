@@ -145,7 +145,7 @@ Both are optional and both are additive: your organization's verified domains st
 - [Integration Guide](docs/integration-guide.md): step-by-step setup from account creation to testing
 - [API Reference](docs/api-reference.md): all public types and methods
 - [Deferred Deep Links](docs/deferred-deep-links.md): deferred attribution flow and edge cases
-- [Attribution](docs/attribution.md): Play Install Referrer and fingerprint matching
+- [Attribution](docs/attribution.md): Play Install Referrer and probabilistic matching
 - [Error Handling](docs/error-handling.md): every error case with recovery actions
 - [Architecture](docs/architecture.md): how the SDK communicates with WarpLink
 - [Troubleshooting](docs/troubleshooting.md): common issues and solutions

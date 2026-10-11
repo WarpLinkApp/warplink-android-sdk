@@ -168,7 +168,7 @@ Check for a deferred deep link on first launch. Returns `null` in the success ca
 
 **Behavior:**
 - Fires automatically from `configure()` when `automaticDeferredDeepLinks = true` (the default); call it directly only when you have disabled that flag.
-- On first launch: reads Play Install Referrer (deterministic), then falls back to fingerprint matching (probabilistic). Sends device signals to the attribution API and returns the match result.
+- On first launch: reads Play Install Referrer (deterministic), then falls back to probabilistic matching (probabilistic). Sends device signals to the attribution API and returns the match result.
 - Completion is recorded only on a definitive server response, so an offline first launch retries next launch. Once complete, subsequent launches return the cached result with no network call. The completion marker is stored in `noBackupFilesDir`, so a reinstall re-runs the check.
 - The matched deep link has `isDeferred = true` and includes `matchType`, `matchConfidence`, and `matchGuaranteed`.
 
@@ -311,7 +311,7 @@ data class WarpLinkDeepLink(
 | `isDeferred` | `Boolean` | Whether this deep link was resolved via deferred attribution. |
 | `matchType` | `MatchType?` | The type of attribution match (`DETERMINISTIC` or `PROBABILISTIC`). |
 | `matchConfidence` | `Double?` | The confidence score of the attribution match (0.0 to 1.0). |
-| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. |
+| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match is a best guess from a network-shaped match key and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. |
 
 ### Working with `customParams`
 
@@ -350,7 +350,7 @@ enum class MatchType {
 | Value | Description |
 |-------|-------------|
 | `DETERMINISTIC` | Matched via Play Install Referrer. Confidence is always 1.0 and `matchGuaranteed` is `true`. |
-| `PROBABILISTIC` | Matched via fingerprint. Confidence varies by time window (0.20 to 0.85), reduced further when the fingerprint bucket was ambiguous or the click IP was widely shared. `matchGuaranteed` is always `false`. |
+| `PROBABILISTIC` | Matched via a hashed match key. Confidence varies by time window (0.20 to 0.85), reduced further when the match key bucket was ambiguous or the click IP was widely shared. `matchGuaranteed` is always `false`. |
 
 See [Attribution](attribution.md) for details on confidence scores.
 

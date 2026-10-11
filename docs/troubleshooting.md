@@ -119,7 +119,7 @@ There is no way to add attribution access to an existing API key. Create an SDK 
 
 ## 4. Play Install Referrer Not Working
 
-**Symptoms:** Deferred deep links fall back to fingerprint matching instead of deterministic (Play Install Referrer) matching.
+**Symptoms:** Deferred deep links fall back to probabilistic matching instead of deterministic (Play Install Referrer) matching.
 
 ### Device needs Google Play Services
 
@@ -128,7 +128,7 @@ The Play Install Referrer API requires Google Play Services. It's unavailable on
 - Emulators without Google Play
 - Sideloaded apps (installed via `adb install` or direct APK)
 
-The SDK automatically falls back to fingerprint matching in these cases.
+The SDK automatically falls back to probabilistic matching in these cases.
 
 ### Check dependency
 
@@ -140,7 +140,7 @@ implementation("com.android.installreferrer:installreferrer:2.2")
 
 ### Timeout
 
-The SDK uses a 2-second timeout for the referrer read. On slow devices or when Play Services is initializing, this timeout may expire. The SDK falls back to fingerprint matching.
+The SDK uses a 2-second timeout for the referrer read. On slow devices or when Play Services is initializing, this timeout may expire. The SDK falls back to probabilistic matching.
 
 ---
 
@@ -188,9 +188,9 @@ If your custom-domain link returns `InvalidUrl`, the domain list may not have lo
 
 If the user installs the app after the link's match window, the click is no longer eligible. The window is server-authoritative (set per link in the dashboard, `match_window_hours`); there is no client-side option to tune it. Increase the window on the link if legitimate installs arrive later.
 
-### Referrer unavailable and fingerprint didn't match
+### Referrer unavailable and match key didn't match
 
-On sideloaded apps or devices without Google Play, the SDK relies on fingerprint matching. If network conditions changed significantly between click and install (different Wi-Fi, VPN, etc.), the fingerprint may not match.
+On sideloaded apps or devices without Google Play, the SDK relies on probabilistic matching. If network conditions changed significantly between click and install (different Wi-Fi, VPN, etc.), the match key may not match.
 
 ### Check already completed
 
@@ -276,7 +276,7 @@ adb logcat -s WarpLink
 **Deferred deep links:**
 - `"Retrying deferred check after a previous failed attempt"`: an earlier launch ran the check offline or got no definitive answer
 - `"First launch: trying Play Install Referrer"`: the deferred check is starting on the referrer path
-- `"First launch: collecting device signals"`: the deferred check is starting on the fingerprint path (no referrer reader)
+- `"First launch: collecting device signals"`: the deferred check is starting on the probabilistic path (no referrer reader)
 - `"Referrer found: "` followed by the link id: the Play Install Referrer named a WarpLink link
 - `"No WarpLink referrer, falling back to fingerprint"`: organic install, or the referrer was unavailable
 - `"Deferred deep link matched: "` followed by the link id: match found

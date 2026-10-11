@@ -253,7 +253,7 @@ WarpLink.checkDeferredDeepLink { result ->
 | First launch detection | Built-in | Built-in (no-backup completion marker, reinstall-safe) |
 | Caching | Automatic | Automatic (cached after a definitive check) |
 | Attribution data | None | `matchType`, `matchConfidence` |
-| Matching method | Play Install Referrer | Play Install Referrer + fingerprint fallback |
+| Matching method | Play Install Referrer | Play Install Referrer + probabilistic fallback |
 | Custom params | Via URL query params | `deepLink.customParams` map |
 
 ## Step 7: Testing Checklist

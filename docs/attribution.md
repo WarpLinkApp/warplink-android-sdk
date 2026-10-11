@@ -4,7 +4,7 @@ WarpLink uses two tiers of attribution matching to connect app installs and open
 
 ## Overview
 
-When a user interacts with a WarpLink URL, the platform captures signals from the click. When the app opens (or is installed and opened for the first time), the SDK sends a small set of device signals to the WarpLink API. The **server** derives the request IP and computes the fingerprint from both sides, then determines the match.
+When a user interacts with a WarpLink URL, the platform captures signals from the click. When the app opens (or is installed and opened for the first time), the SDK sends a small set of device signals to the WarpLink API. The **server** derives the request IP and computes the match key from both sides, then determines the match.
 
 The result is returned as a `WarpLinkDeepLink` with `matchType`, `matchConfidence`, and `matchGuaranteed` properties.
 
@@ -13,9 +13,9 @@ The result is returned as a `WarpLinkDeepLink` with `matchType`, `matchConfidenc
 On Android, matching is attempted in this order:
 
 1. **Play Install Referrer** (deterministic, confidence 1.0, `matchGuaranteed = true`)
-2. **Enriched fingerprint** (probabilistic, confidence 0.20 to 0.85 before multipliers, `matchGuaranteed = false`)
+2. **Enriched probabilistic match** (probabilistic, confidence 0.20 to 0.85 before multipliers, `matchGuaranteed = false`)
 
-The first successful match wins. Fingerprint is only attempted if the referrer is unavailable or doesn't contain WarpLink data.
+The first successful match wins. Probabilistic matching is only attempted if the referrer is unavailable or doesn't contain WarpLink data.
 
 ## Deterministic Matching (Play Install Referrer)
 
@@ -30,13 +30,13 @@ The first successful match wins. Fingerprint is only attempted if the referrer i
 | Requires user permission? | No |
 | Sent alongside | `accept_language`, `timezone`, `timezone_offset`, so the server can fall back to a probabilistic match when the referrer names a link that no longer exists |
 
-When a user clicks a WarpLink URL and is redirected to the Play Store, the referrer URL includes `utm_source=warplink&utm_content={link_id}`. After install and first open, the SDK reads the referrer via `InstallReferrerClient` and extracts the link ID for a direct match. Accuracy is 100% because the link ID is passed through the Play Store itself, with no fingerprinting.
+When a user clicks a WarpLink URL and is redirected to the Play Store, the referrer URL includes `utm_source=warplink&utm_content={link_id}`. After install and first open, the SDK reads the referrer via `InstallReferrerClient` and extracts the link ID for a direct match. Accuracy is 100% because the link ID is passed through the Play Store itself, with no probabilistic matching.
 
-The SDK uses a 2-second timeout for the referrer read. If it expires (e.g., Google Play Services is slow), the SDK falls back to fingerprint matching.
+The SDK uses a 2-second timeout for the referrer read. If it expires (e.g., Google Play Services is slow), the SDK falls back to probabilistic matching.
 
 > **Note on device IDs:** iOS sends the vendor identifier (IDFV) only as a repeat check, never as a deterministic match. Android has no privacy-safe equivalent, so this SDK never sends a `device_id` and the Play Install Referrer is the only deterministic path. There is no GAID and no Android ID read anywhere in the SDK. The attribution payload does carry a `device_id` field, which the shared API schema defines for iOS; on Android it is always omitted.
 
-## Probabilistic Matching (Enriched Fingerprint)
+## Probabilistic Matching (Enriched Match Key)
 
 **Used for:** First-install attribution when the Play Install Referrer is unavailable (sideloaded apps, non-Google-Play devices).
 
@@ -48,23 +48,23 @@ The SDK uses a 2-second timeout for the referrer read. If it expires (e.g., Goog
 | Requires Google Play? | No |
 | Requires user permission? | No |
 
-On first launch, if the referrer is unavailable, the SDK collects its device signals and sends them to the attribution API. The server combines them with the request's IP address to compute the fingerprint and check for a match.
+On first launch, if the referrer is unavailable, the SDK collects its device signals and sends them to the attribution API. The server combines them with the request's IP address to compute the match key and check for a match.
 
 ### Signals Collected by the SDK
 
 | Signal | Purpose | Source |
 |--------|---------|--------|
-| Accept-Language | Fingerprint component (raw preferred language tag; the server normalizes it) | `Locale.getDefault().toLanguageTag()` |
-| Timezone | Fingerprint component (the IANA zone name, e.g. `America/Toronto`) | `ZoneId.systemDefault().id`, or empty when the process default zone has no tzdb entry |
-| Timezone offset | Fingerprint component, fallback key (minutes, JS sign convention, DST-aware) | `-(TimeZone.getDefault().getOffset(now) / 60000)` |
+| Accept-Language | Match key component (raw preferred language tag; the server normalizes it) | `Locale.getDefault().toLanguageTag()` |
+| Timezone | Match key component (the IANA zone name, e.g. `America/Toronto`) | `ZoneId.systemDefault().id`, or empty when the process default zone has no tzdb entry |
+| Timezone offset | Match key component, fallback key (minutes, JS sign convention, DST-aware) | `-(TimeZone.getDefault().getOffset(now) / 60000)` |
 
 **On the zone name (new in 1.1.0).** The IANA zone name carries far more entropy than the offset it joins: roughly 340 zones against roughly 38 offsets. It also does not shift at a daylight-saving boundary, which used to break a click and its install apart when the clocks changed between them. The SDK sends both, and the server prefers the zone name (`fingerprint_version: enriched_tz`), falling back to the offset for SDKs that send no zone name. Collection never fails: if the zone cannot be resolved, it is omitted and the request still carries the language and the offset.
 
-**Not collected.** User-Agent and screen dimensions were removed from the fingerprint. They never matched between the browser (at click time) and the native app (at install time). Browser and native UA strings differ, and CSS pixels and physical pixels differ, so they only added noise. The IP address is derived server-side and is never sent by the SDK.
+**Not collected.** User-Agent and screen dimensions were removed from the match key. They never matched between the browser (at click time) and the native app (at install time). Browser and native UA strings differ, and CSS pixels and physical pixels differ, so they only added noise. The IP address is derived server-side and is never sent by the SDK.
 
 ### Confidence by Time Window
 
-The elapsed time and the fingerprint variant set the ceiling. `enriched_tz` is the zone-name variant that an SDK collecting a zone name sends; `enriched` is the offset variant kept for older SDKs; `basic` is the language-only key the server tries last.
+The elapsed time and the match key variant set the ceiling. `enriched_tz` is the zone-name variant that an SDK collecting a zone name sends; `enriched` is the offset variant kept for older SDKs; `basic` is the language-only key the server tries last.
 
 | Time Since Click | `enriched_tz` | `enriched` | `basic` |
 |------------------|---------------|------------|---------|
@@ -78,7 +78,7 @@ Confidence decreases over time because IP addresses and network conditions chang
 
 | Condition | Multiplier |
 |-----------|------------|
-| More than one claimable click sat in the fingerprint's bucket | 0.6 |
+| More than one claimable click sat in the match key's bucket | 0.6 |
 | The click's IP was carrier-grade NAT or private | 0.6 |
 | The click's IP was a household IPv4 address | 0.9 |
 | The click's IP was IPv6 | 1.0 |
@@ -87,11 +87,11 @@ Confidence decreases over time because IP addresses and network conditions chang
 
 The match window is server-authoritative, set per link in the dashboard. It **defaults to 6 hours and cannot exceed 24**; a link created before that ceiling may still carry a longer value, but the platform clamps it to 24 hours on read. There is no client-side window to tune.
 
-The window is short on purpose. The fingerprint key is a network, not a device: an IP address, a normalized language, and a timezone. Every phone behind one NAT that shares a language and timezone lands in the same bucket, so each extra hour lets another stranger join it while adding almost no real matches. This governs the probabilistic tier only. The Play Install Referrer path reads stored click data instead of the fingerprint bucket, so the window does not apply to it.
+The window is short on purpose. The match key is a network, not a device: an IP address, a normalized language, and a timezone. Every phone behind one NAT that shares a language and timezone lands in the same bucket, so each extra hour lets another stranger join it while adding almost no real matches. This governs the probabilistic tier only. The Play Install Referrer path reads stored click data instead of the match key bucket, so the window does not apply to it.
 
 ## App Identity
 
-Every attribution request also carries `app_package_name`, your app's application ID, on both the referrer path and the fingerprint path. It is not a fingerprint component and does not affect confidence.
+Every attribution request also carries `app_package_name`, your app's application ID, on both the referrer path and the probabilistic path. It is not a match key component and does not affect confidence.
 
 An API key is scoped to your organization, not to a single app. If your organization ships more than one app, the package name is what lets the server attribute an install to the app it actually happened in. The SDK reads it from the context you pass to `configure`, so there is nothing to set up.
 
@@ -109,7 +109,7 @@ Each request carries one boolean, `is_reinstall`, so the two can be told apart
 afterwards. It is `true` when this device completed WarpLink attribution under
 an earlier install of your app, and `false` on a genuine first install. It
 gates nothing: it does not suppress the check, change the match cascade, or
-affect confidence, and it is not a fingerprint component.
+affect confidence, and it is not a match key component.
 
 | Signal | Field | Source |
 |--------|-------|--------|
@@ -132,7 +132,7 @@ The `WarpLinkDeepLink` returned via `onLink` (or `handleDeepLink` / `checkDeferr
 
 ### `matchGuaranteed` Is Not a Credential
 
-`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Use it, like `matchConfidence`, to pick the destination to route to, not to authenticate the user. A probabilistic match is a best guess drawn from a network-shaped fingerprint, so even a high score can name the wrong user. Authenticate the user and check authorization separately before showing private data or doing anything sensitive, guaranteed match or not.
+`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Use it, like `matchConfidence`, to pick the destination to route to, not to authenticate the user. A probabilistic match is a best guess drawn from a network-shaped match key, so even a high score can name the wrong user. Authenticate the user and check authorization separately before showing private data or doing anything sensitive, guaranteed match or not.
 
 ```kotlin
 if (link.matchGuaranteed) {
@@ -179,20 +179,21 @@ WarpLink.configure(
 - **No location data**
 - **No contacts or personal data**
 - **No cross-app identifiers**
-- **No User-Agent or screen dimensions** (removed from the fingerprint)
+- **No User-Agent or screen dimensions** (removed from the match key)
 
 ### What the SDK Does Collect
 
 - **Play Install Referrer**: first-party Google API data, passed through the Play Store when the user installs the app. No additional permission needed.
-- **Fingerprint signals**: non-PII characteristics (preferred language, timezone name, timezone offset). These are the same signals any web server receives in HTTP headers.
+- **Match signals**: non-PII characteristics (preferred language, timezone name, timezone offset). These are the same signals any web server receives in HTTP headers.
 - **Reinstall flag**: one boolean, `is_reinstall`, saying whether this device has run the app before. It is sent on every attribution request, on both the deterministic and the probabilistic path. It exists so a returning user is routed back to the content they tapped, and so reinstalls can be told apart from first installs afterwards.
 - **Backup dependency**: the device-seen marker behind `is_reinstall` lives in `SharedPreferences`, which only outlives an uninstall when Android Auto Backup is enabled (`android:allowBackup`, the default). With backup off, a reinstall is reported as a first install. The SDK logs this at `configure()` when debug logging is on.
 
 ### Data Handling
 
 - Device signals are sent to the WarpLink API over HTTPS
-- Fingerprint data is used solely for attribution matching
+- Match data is used solely for attribution matching
 - No cross-app tracking is performed
+- We use probabilistic matching to restore the tapped link on first launch after install. It uses no advertising ID, and the server keys the pending deep link by an HMAC-SHA256 hash of the IP address, primary language, and time zone. Each tap can be matched only within the app's match window, and pending entries expire automatically. A matched install keeps the hashed key for your plan's data retention period. The raw IP address is not stored. The time zone is used by the enriched variant only (the basic variant uses the IP address and primary language)
 - Play Install Referrer data is read once at first launch and not stored beyond the attribution result
 - The reinstall flag is retained on the install record, so it outlives the request that carried it
 

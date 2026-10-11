@@ -24,7 +24,7 @@ Without deferred deep links, the user would land on your default home screen wit
 4. **Install.** User installs and opens the app
 5. **First-launch detection.** The SDK detects the first launch (see Caching below)
 6. **Play Install Referrer check.** The SDK reads the referrer via `InstallReferrerClient`; if it contains `utm_source=warplink`, a deterministic match is made (confidence 1.0, `matchGuaranteed = true`). The request also carries the device signals, so a referrer that names a deleted link can still fall back to a probabilistic match. A deferred link is delivered only when the Play install began within the last seven days; an older referrer is still attributed, and nothing is routed.
-7. **Fingerprint fallback.** If the referrer is unavailable (sideloaded, no Google Play), the SDK sends `accept_language` + `timezone` + `timezone_offset` to `/attribution/match` and the server computes a probabilistic match
+7. **Probabilistic fallback.** If the referrer is unavailable (sideloaded, no Google Play), the SDK sends `accept_language` + `timezone` + `timezone_offset` to `/attribution/match` and the server computes a probabilistic match
 8. **Match result.** A `WarpLinkDeepLink` with `isDeferred = true` is dispatched to your `onLink` callback
 
 ## Automatic vs. Manual
@@ -74,23 +74,23 @@ WarpLink.checkDeferredDeepLink { result ->
 | Scenario | Confidence | Match Type |
 |----------|------------|------------|
 | Play Install Referrer | 1.0 | `DETERMINISTIC` |
-| Fingerprint, < 1 hour since click | 0.85 | `PROBABILISTIC` |
-| Fingerprint, < 3 hours since click | 0.65 | `PROBABILISTIC` |
-| Fingerprint, < 6 hours since click | 0.50 | `PROBABILISTIC` |
-| Fingerprint, < 24 hours since click | 0.30 | `PROBABILISTIC` |
+| Probabilistic match, < 1 hour since click | 0.85 | `PROBABILISTIC` |
+| Probabilistic match, < 3 hours since click | 0.65 | `PROBABILISTIC` |
+| Probabilistic match, < 6 hours since click | 0.50 | `PROBABILISTIC` |
+| Probabilistic match, < 24 hours since click | 0.30 | `PROBABILISTIC` |
 | 24 hours or more since click | no match | none |
 
-The fingerprint rows are the ceilings for the zone-name variant that an SDK collecting a zone name sends. The offset variant kept for older SDKs scores a band lower (0.80 down to 0.25), and the language-only fallback lower still (0.70 down to 0.20).
+The probabilistic rows are the ceilings for the zone-name variant that an SDK collecting a zone name sends. The offset variant kept for older SDKs scores a band lower (0.80 down to 0.25), and the language-only fallback lower still (0.70 down to 0.20).
 
-Elapsed time is not the only thing that moves a probabilistic score. Two multipliers reduce whichever ceiling applied: 0.6 when more than one distinct link shared the fingerprint, and 0.6 / 0.9 / 1.0 for a carrier-grade-NAT, household-IPv4, or IPv6 click address.
+Elapsed time is not the only thing that moves a probabilistic score. Two multipliers reduce whichever ceiling applied: 0.6 when more than one distinct link shared the match key, and 0.6 / 0.9 / 1.0 for a carrier-grade-NAT, household-IPv4, or IPv6 click address.
 
-**Recommendation:** Route to specific content when `matchConfidence` is above 0.5; show generic onboarding below 0.5. `matchGuaranteed` is `true` only for a deterministic match; use it to pick the destination, not as a credential, since a probabilistic match is a best guess from a network-shaped fingerprint and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. See [Attribution](attribution.md) for details.
+**Recommendation:** Route to specific content when `matchConfidence` is above 0.5; show generic onboarding below 0.5. `matchGuaranteed` is `true` only for a deterministic match; use it to pick the destination, not as a credential, since a probabilistic match is a best guess from a network-shaped match key and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. See [Attribution](attribution.md) for details.
 
 ## Match Window
 
 The match window (how far back the server looks for a matching click) is **server-authoritative**, set per link (`match_window_hours`) in the dashboard. It **defaults to 6 hours and cannot exceed 24**; a link created before that ceiling may still carry a longer value, but the platform clamps it to 24 hours on read. There is no client-side window option.
 
-The window is short on purpose. The fingerprint key is a network, not a device: an IP address, a normalized language, and a timezone. Every phone behind one NAT that shares a language and timezone lands in the same bucket, so each extra hour lets another stranger join it while adding almost no real matches. It governs the probabilistic tier only; the Play Install Referrer path is unaffected.
+The window is short on purpose. The match key is a network, not a device: an IP address, a normalized language, and a timezone. Every phone behind one NAT that shares a language and timezone lands in the same bucket, so each extra hour lets another stranger join it while adding almost no real matches. It governs the probabilistic tier only; the Play Install Referrer path is unaffected.
 
 ## Caching Behavior
 
@@ -113,7 +113,7 @@ The referrer is the primary (deterministic) method but is unavailable when:
 - The device has no Google Play Services (e.g., some Huawei devices)
 - The referrer data has expired
 
-In these cases the SDK transparently falls back to fingerprint matching (probabilistic). No code changes are needed.
+In these cases the SDK transparently falls back to probabilistic matching (probabilistic). No code changes are needed.
 
 ### Offline First Launch
 
@@ -125,7 +125,7 @@ The first-launch marker is kept out of Android Auto Backup (stored via `noBackup
 
 ### Multiple Links Clicked Before Install
 
-A fingerprint is a network rather than a device, so several clicks can land under one key: your own user clicking twice, or two strangers behind the same NAT. The platform keeps them as a list, newest first, up to 10 per fingerprint. A second click no longer overwrites the first, so the install that belongs to the earlier click can still find it.
+A match key is a network rather than a device, so several clicks can land under one key: your own user clicking twice, or two strangers behind the same NAT. The platform keeps them as a list, newest first, up to 10 per match key. A second click no longer overwrites the first, so the install that belongs to the earlier click can still find it.
 
 The server matches against the newest entry your app is allowed to claim, and removes only that entry once it becomes an install. When more than one entry was claimable, the match is scored lower to reflect that the answer was picked from a set.
 
