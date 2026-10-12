@@ -311,7 +311,7 @@ data class WarpLinkDeepLink(
 | `isDeferred` | `Boolean` | Whether this deep link was resolved via deferred attribution. |
 | `matchType` | `MatchType?` | The type of attribution match (`DETERMINISTIC` or `PROBABILISTIC`). |
 | `matchConfidence` | `Double?` | The confidence score of the attribution match (0.0 to 1.0). |
-| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match is a best guess from a network-shaped match key and can name the wrong user. Authenticate the user and check authorization separately before anything sensitive. |
+| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match comes from a hashed match key built from the IP address and language, with time zone when available, so use it to route the user, not to identify them. Authenticate the user and check authorization separately before anything sensitive. |
 
 ### Working with `customParams`
 

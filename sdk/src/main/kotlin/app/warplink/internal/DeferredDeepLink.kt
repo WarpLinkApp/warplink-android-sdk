@@ -76,7 +76,7 @@ private fun tryReferrerThenFallback(
             )
         } else {
             logger?.log(
-                "No WarpLink referrer, falling back to fingerprint"
+                "No WarpLink referrer, falling back to probabilistic matching"
             )
             collectAndMatch(
                 fingerprintCollector, apiClient,

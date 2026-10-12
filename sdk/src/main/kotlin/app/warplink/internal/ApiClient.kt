@@ -390,7 +390,7 @@ internal class ApiClient(
 
     /**
      * Raw-signals enriched path: only accept_language + timezone. User-Agent and
-     * screen dimensions were dropped from the server fingerprint, since they
+     * screen dimensions were dropped from the server match key, since they
      * never match between the browser (click) and the native app (install).
      */
     private fun putFingerprintSignals(body: JSONObject, signals: DeviceSignals) {

@@ -132,7 +132,7 @@ The `WarpLinkDeepLink` returned via `onLink` (or `handleDeepLink` / `checkDeferr
 
 ### `matchGuaranteed` Is Not a Credential
 
-`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Use it, like `matchConfidence`, to pick the destination to route to, not to authenticate the user. A probabilistic match is a best guess drawn from a network-shaped match key, so even a high score can name the wrong user. Authenticate the user and check authorization separately before showing private data or doing anything sensitive, guaranteed match or not.
+`matchGuaranteed` is `true` only when the match came from a deterministic signal (the Play Install Referrer). Use it, like `matchConfidence`, to pick the destination to route to, not to authenticate the user. A probabilistic match comes from a hashed match key built from the IP address and language, with time zone when available. Use it to route the user, not to identify them. `matchGuaranteed` is false for probabilistic matches, however high the score. Authenticate the user and check authorization separately before showing private data or doing anything sensitive, guaranteed match or not.
 
 ```kotlin
 if (link.matchGuaranteed) {

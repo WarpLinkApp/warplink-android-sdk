@@ -8,7 +8,7 @@ import java.util.TimeZone
  * Collects the device signals the server's raw-signals attribution path needs:
  * the raw preferred language tag, the DST-aware timezone offset, and the IANA
  * zone name. The server normalizes the language and combines the rest with the
- * request IP to compute the fingerprint; nothing is hashed on device.
+ * request IP to compute the match key; nothing is hashed on device.
  *
  * Collection is total: it always returns signals and never throws. That is
  * deliberate, and it mirrors iOS's `FingerprintCollector.collect()`.
@@ -62,7 +62,7 @@ internal class FingerprintCollector {
      *
      * Note the offset above reads the same `TimeZone.getDefault()` that a host
      * would have poisoned, so in that scenario it reports the fake zone's
-     * offset. The two are not independent, and the fingerprint can still miss.
+     * offset. The two are not independent, and the match can still miss.
      * Sending a degraded request beats sending none: the referrer and device-id
      * tiers are unaffected, and a miss is recorded server-side where a
      * cancelled request is not.
