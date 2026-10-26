@@ -15,7 +15,7 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-val SDK_VERSION: String // "1.1.1"
+val SDK_VERSION: String // "1.2.0"
 ```
 
 The current SDK version string.
@@ -168,7 +168,7 @@ Check for a deferred deep link on first launch. Returns `null` in the success ca
 
 **Behavior:**
 - Fires automatically from `configure()` when `automaticDeferredDeepLinks = true` (the default); call it directly only when you have disabled that flag.
-- On first launch: reads Play Install Referrer (deterministic), then falls back to probabilistic matching (probabilistic). Sends device signals to the attribution API and returns the match result.
+- On first launch: reads Play Install Referrer (deterministic). When the referrer carries a recovery token (`wl_rt`), the token is redeemed first, alone, for an exact match. A refused token is dropped and the check goes on with the link id and then probabilistic matching. A token the server cannot confirm yet ends the check without completing it, so the next launch tries again. Sends device signals to the attribution API and returns the match result.
 - Completion is recorded only on a definitive server response, so an offline first launch retries next launch. Once complete, subsequent launches return the cached result with no network call. The completion marker is stored in `noBackupFilesDir`, so a reinstall re-runs the check.
 - The matched deep link has `isDeferred = true` and includes `matchType`, `matchConfidence`, and `matchGuaranteed`.
 
@@ -195,6 +195,53 @@ WarpLink.checkDeferredDeepLink { result ->
     }
 }
 ```
+
+#### `redeemInvitation(text, callback)`
+
+```kotlin
+fun redeemInvitation(
+    text: String,
+    callback: (Result<WarpLinkDeepLink?>) -> Unit
+)
+```
+
+Redeems a referral invitation the person pasted. The SDK never reads the clipboard: the text reaches it only through this call, from a paste control the person uses.
+
+- Text that is not an invitation (not 50 base64url characters that decode to 37 bytes) sends nothing and answers `success(null)`.
+- An invitation past its own expiry fails on the device with no request. A `400` from the server fails with `WarpLinkError.ServerError(400, message)`, where the message tells the person to open the invitation link again. It is not retried.
+- A `503` answer means the server cannot confirm a just-issued invitation yet. It fails with `ServerError(503, message)` and a message that asks the person to try again in a minute. The invitation is kept on the device and finished on a later launch, for a bounded number of attempts and until its own expiry.
+- A match calls `onLink` like any other and answers `success(link)` with the evidence fields set.
+
+Onboarding never waits on this call: skipping it, or any failure, leaves the app fully usable.
+
+---
+
+#### `claimReferral(installerId, callback)`
+
+```kotlin
+fun claimReferral(
+    installerId: String,
+    callback: (Result<ReferralClaimResult>) -> Unit
+)
+```
+
+Imports: `ReferralClaimResult` is in `app.warplink`. The enums `ReferralClaimStatus`, `MatchMethod`, `EvidenceClass` and `ReplayState` are in `app.warplink.referral`.
+
+```kotlin
+import app.warplink.ReferralClaimResult
+import app.warplink.referral.ReferralClaimStatus
+import app.warplink.referral.MatchMethod
+import app.warplink.referral.EvidenceClass
+import app.warplink.referral.ReplayState
+```
+
+Credits the referral behind this install to the person who just signed up. `installerId` is your own stable id for that person, 1 to 128 characters. Claiming is idempotent: the same id can be sent again and the referral is never credited twice.
+
+`ReferralClaimStatus.NONE` is an ordinary answer, not an error. The call fails only when the server cannot be reached, the key is refused, or `installerId` is empty or too long. It never fails because the install has no referral.
+
+`ReferralClaimResult` carries `status` (`CLAIMED`, `FLAGGED`, `IGNORED` or `NONE`), `referralId`, `linkId`, `linkUrl`, `matchMethod`, `isExact`, `matchConfidence`, `flags`, `duplicateOf`, `updated` and `replayState`. Every field after `status` has a default.
+
+---
 
 ---
 
@@ -296,7 +343,13 @@ data class WarpLinkDeepLink(
     val isDeferred: Boolean = false,
     val matchType: MatchType? = null,
     val matchConfidence: Double? = null,
-    val matchGuaranteed: Boolean = false
+    val matchGuaranteed: Boolean = false,
+    val attributionId: String? = null,
+    val matchMethod: MatchMethod? = null,
+    val evidenceClass: EvidenceClass? = null,
+    val replayState: ReplayState? = null,
+    val capturedParams: Map<String, Any> = emptyMap(),
+    val tappedAt: String? = null
 )
 ```
 
@@ -311,7 +364,13 @@ data class WarpLinkDeepLink(
 | `isDeferred` | `Boolean` | Whether this deep link was resolved via deferred attribution. |
 | `matchType` | `MatchType?` | The type of attribution match (`DETERMINISTIC` or `PROBABILISTIC`). |
 | `matchConfidence` | `Double?` | The confidence score of the attribution match (0.0 to 1.0). |
-| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match comes from a hashed match key built from the IP address and language, with time zone when available, so use it to route the user, not to identify them. Authenticate the user and check authorization separately before anything sensitive. |
+| `matchGuaranteed` | `Boolean` | `true` only when the match was deterministic. Use it, like `matchConfidence`, to pick the destination to route to, not as a credential: a probabilistic match is an estimate from device signals, namely the IP address and language, with time zone when available, so use it to route the user, not to identify them. Authenticate the user and check authorization separately before anything sensitive. |
+| `attributionId` | `String?` | A stable id for this attribution. Null when the server did not send one. |
+| `matchMethod` | `MatchMethod?` | How the match was made: `INSTALL_TOKEN`, `ANDROID_REFERRER`, `DEVICE_ID`, `LINK_OPEN` or `PROBABILISTIC`. Null for a value this SDK does not know. |
+| `evidenceClass` | `EvidenceClass?` | `EXACT`, `ESTIMATED` or `LEGACY_LINK`. A match made from a link id alone is `LEGACY_LINK` with method `LINK_OPEN`; the SDK never upgrades it to a token-backed match. |
+| `replayState` | `ReplayState?` | `ORIGINAL` for the first read of the match, `REPLAYED` for a later one. |
+| `capturedParams` | `Map<String, Any>` | The allowed parameters captured when the link was tapped. Empty when there are none. |
+| `tappedAt` | `String?` | When the link was tapped, as the server wrote it. |
 
 ### Working with `customParams`
 
@@ -350,7 +409,7 @@ enum class MatchType {
 | Value | Description |
 |-------|-------------|
 | `DETERMINISTIC` | Matched via Play Install Referrer. Confidence is always 1.0 and `matchGuaranteed` is `true`. |
-| `PROBABILISTIC` | Matched via a hashed match key. Confidence varies by time window (0.20 to 0.85), reduced further when the match key bucket was ambiguous or the click IP was widely shared. `matchGuaranteed` is always `false`. |
+| `PROBABILISTIC` | Matched via an estimate from device signals. Confidence varies by time window (0.20 to 0.85), reduced further when the match key bucket was ambiguous or the click IP was widely shared. `matchGuaranteed` is always `false`. |
 
 See [Attribution](attribution.md) for details on confidence scores.
 
@@ -375,7 +434,7 @@ sealed class WarpLinkError(
 | `InvalidApiKeyFormat` | SDK key format is invalid (must be `wl_live_` or `wl_test_` + 32 alphanumeric characters). Reported to `onLink` and logged; `configure()` does **not** throw. |
 | `InvalidApiKey` | SDK key was rejected by the server. It was revoked, mistyped, or is an API key. |
 | `NetworkError(cause: Throwable)` | Network request failed with an underlying cause. |
-| `ServerError(statusCode: Int, message: String)` | API returned an error response. |
+| `ServerError(statusCode: Int, message: String)` | API returned an error response. A refused or expired referral invitation is a `ServerError` with status `400` and a message that says how to reopen the invitation. An invitation the server cannot confirm yet is status `503` with a try again message. |
 | `InvalidUrl` | The URI is not a recognized WarpLink App Link (host is not `aplnk.to` or a verified custom domain). |
 | `LinkNotFound` | The link was not found (404) or is no longer active. |
 | `PasswordRequired` | The link is password protected, so it resolves to no destination and no platform URLs. |

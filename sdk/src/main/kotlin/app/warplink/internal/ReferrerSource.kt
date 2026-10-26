@@ -2,15 +2,20 @@ package app.warplink.internal
 
 /**
  * What the Play Install Referrer said about this install, when it named a
- * WarpLink link.
+ * WarpLink link or carried a recovery token.
  *
+ * @property linkId The tapped link, or null when the referrer carried only a
+ * recovery token.
  * @property installBeginTimestampSeconds Seconds since the epoch when the Play
  * install began, from `ReferrerDetails.installBeginTimestampSeconds`; 0 when
  * Play did not say.
+ * @property recoveryToken The per-tap `wl_rt` token, sent to the match call as
+ * `recovery_token`. Never logged.
  */
 internal data class ReferrerRead(
-    val linkId: String,
+    val linkId: String?,
     val installBeginTimestampSeconds: Long,
+    val recoveryToken: String? = null,
 ) {
     /**
      * Whether a match on this referrer should still be ROUTED. The referrer

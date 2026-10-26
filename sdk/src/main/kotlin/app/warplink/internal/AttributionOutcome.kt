@@ -2,6 +2,7 @@ package app.warplink.internal
 
 import app.warplink.MatchType
 import app.warplink.WarpLinkDeepLink
+import app.warplink.internal.referral.withEvidence
 
 /**
  * Abandoned by a reconfigure or reset while this request was in flight.
@@ -67,5 +68,45 @@ internal fun routableDeepLink(response: AttributionResponse): WarpLinkDeepLink? 
         matchType = matchType,
         matchConfidence = response.matchConfidence,
         matchGuaranteed = response.matchGuaranteed
-    )
+    ).withEvidence(response.evidence)
+}
+
+internal fun handleAttributionResponse(
+    response: AttributionResponse,
+    storage: Storage,
+    logger: Logger?,
+    isCurrentCheck: () -> Boolean,
+    routeMatches: Boolean = true,
+    callback: (Result<WarpLinkDeepLink?>) -> Unit
+) {
+    if (handleIfAbandoned(isCurrentCheck, logger, callback)) return
+    if (response.matched && !routeMatches) {
+        settleWithoutRouting(storage, logger, callback)
+        return
+    }
+    val deepLink = routableDeepLink(response)
+
+    // A confirmed no-match settles attribution: the server looked and found
+    // nothing. A match with nothing to route to does not, whatever the server
+    // called it. It is discarded above and the host is told nothing matched, so
+    // completing the check on it spends this install's one attempt on an answer
+    // nobody can act on, and nothing would retry: deferredCheckCompleted
+    // outlives every relaunch and only a reinstall clears it.
+    if (deepLink == null && response.matched) {
+        logger?.log(
+            "Attribution matched with nothing to route to, retrying next launch"
+        )
+        callback(Result.success(null))
+        return
+    }
+
+    storage.deferredCheckCompleted = true
+    storage.cachedAttribution = deepLink
+    storage.referral.evidence.rememberInstall(response.installId)
+    if (deepLink != null) {
+        logger?.log("Deferred deep link matched: ${deepLink.linkId}")
+    } else {
+        logger?.log("No deferred deep link match")
+    }
+    callback(Result.success(deepLink))
 }

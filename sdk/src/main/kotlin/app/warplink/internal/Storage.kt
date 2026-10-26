@@ -3,6 +3,7 @@ package app.warplink.internal
 import android.content.Context
 import android.content.SharedPreferences
 import app.warplink.WarpLinkDeepLink
+import app.warplink.internal.referral.ReferralStores
 
 internal class Storage(context: Context) {
 
@@ -15,6 +16,9 @@ internal class Storage(context: Context) {
     // is restored by Android Auto Backup, so it is the only place a fact about
     // the DEVICE can survive an uninstall.
     private val markers = InstallMarkerStore(context)
+
+    /** The referral handoff's records: install-scoped, like [markers]. */
+    val referral = ReferralStores(context.noBackupFilesDir)
 
     // Read once, at construction, so every decision below sees the same
     // answer for the life of this instance (see InstallProvenance).
@@ -135,6 +139,7 @@ internal class Storage(context: Context) {
     fun clearAll() {
         prefs.edit().clear().apply()
         markers.clear(MARKER_DEFERRED_COMPLETED, MARKER_DEFERRED_ATTEMPTED)
+        referral.clear()
     }
 
     /**

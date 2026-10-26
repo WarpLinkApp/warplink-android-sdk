@@ -1,5 +1,7 @@
 package app.warplink.internal
 
+import app.warplink.internal.referral.ReferralEvidenceFields
+
 internal data class AttributionResponse(
     val matched: Boolean,
     val matchType: String?,
@@ -9,5 +11,7 @@ internal data class AttributionResponse(
     val deepLinkUrl: String?,
     val destinationUrl: String?,
     val customParams: Map<String, Any>?,
-    val installId: String?
+    val installId: String?,
+    /** The 1.2.0 evidence fields, absent from an older server's answer. */
+    val evidence: ReferralEvidenceFields = ReferralEvidenceFields()
 )

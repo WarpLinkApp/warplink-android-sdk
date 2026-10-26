@@ -1,24 +1,22 @@
 package app.warplink
 
-import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
-import app.warplink.internal.ApiClient
 import app.warplink.internal.AutoLinkHandler
-import app.warplink.internal.FingerprintCollector
-import app.warplink.internal.InstallReferrerReader
+import app.warplink.internal.DeferredCheckCoordinator
 import app.warplink.internal.Logger
 import app.warplink.internal.RetrySettings
-import app.warplink.internal.Storage
+import app.warplink.internal.SdkSession
 import app.warplink.internal.UriParser
 import app.warplink.internal.applyDeclaredLinkDomains
-import app.warplink.internal.performDeferredCheck
+import app.warplink.internal.logBackupCaveat
 import app.warplink.internal.performServerValidation
+import app.warplink.internal.referral.ReferralContext
+import app.warplink.internal.referral.ReferralEntry
 import app.warplink.internal.resolveDeepLink
-import java.util.concurrent.atomic.AtomicBoolean
+import app.warplink.internal.startAutomaticHandling
 
 object WarpLink {
 
@@ -32,35 +30,8 @@ object WarpLink {
     val SDK_VERSION: String = BuildConfig.SDK_VERSION
 
     private val lock = Any()
-    private var apiKey: String? = null
-    private var options: WarpLinkOptions? = null
-    private var logger: Logger? = null
-    private var storage: Storage? = null
-    private var apiClient: ApiClient? = null
-    private var fingerprintCollector: FingerprintCollector? = null
-    private var installReferrerReader: InstallReferrerReader? = null
-    private var isApiKeyValid: Boolean? = null
-    private var autoHandler: AutoLinkHandler? = null
-    private val deferredCheckInFlight = AtomicBoolean(false)
-
-    /**
-     * Callbacks that arrived while a deferred check was already running. They are
-     * drained with the in-flight check's own result, so a manual caller never
-     * loses a first-launch match to the automatic check that ran before it.
-     * Guarded by [lock].
-     */
-    private val pendingDeferredCallbacks =
-        mutableListOf<(Result<WarpLinkDeepLink?>) -> Unit>()
-
-    /**
-     * Bumped whenever an in-flight deferred check is abandoned (reconfigure,
-     * reset). A check captures the value at start and compares it on completion,
-     * so a stale response answers only its own caller instead of clearing the
-     * replacement's in-flight flag or draining its parked callbacks, and applies
-     * nothing to storage (see `performDeferredCheck`'s `isCurrentCheck`).
-     * Guarded by [lock].
-     */
-    private var deferredCheckGeneration = 0
+    private var session: SdkSession? = null
+    private val deferredChecks = DeferredCheckCoordinator()
 
     /**
      * Retry settings for the two funnels this facade drives, overridden only by tests.
@@ -76,11 +47,11 @@ object WarpLink {
     internal var retrySettingsOverride: RetrySettings? = null
 
     val isConfigured: Boolean
-        get() = synchronized(lock) { apiKey != null }
+        get() = synchronized(lock) { session != null }
 
     /** Cached attribution result from the last deferred deep link check, or null if none. */
     val attributionResult: WarpLinkDeepLink?
-        get() = synchronized(lock) { storage?.cachedAttribution }
+        get() = synchronized(lock) { session?.storage?.cachedAttribution }
 
     /**
      * Whether the deferred attribution check has definitively completed for this
@@ -88,7 +59,7 @@ object WarpLink {
      * `onLink` at most once across launches, matching the native auto-dispatch guard.
      */
     fun isAttributionComplete(): Boolean =
-        synchronized(lock) { storage?.deferredCheckCompleted ?: false }
+        synchronized(lock) { session?.storage?.deferredCheckCompleted ?: false }
 
     /**
      * Configure the SDK. With a bare call the SDK automatically handles
@@ -113,57 +84,33 @@ object WarpLink {
         }
 
         synchronized(lock) {
-            autoHandler?.unregister()
-            this.apiKey = apiKey
-            this.options = options
-            this.logger = Logger(options.debugLogging)
-            this.storage = Storage(appContext)
-            this.apiClient =
-                ApiClient(apiKey, options.apiEndpoint, appContext.packageName)
-            this.fingerprintCollector = FingerprintCollector()
-            this.installReferrerReader =
-                InstallReferrerReader(appContext, this.logger)
-            this.isApiKeyValid = null
-            this.autoHandler = options.onLink?.let { sink ->
-                AutoLinkHandler(
-                    application = appContext as? Application,
-                    logger = this.logger,
-                    isWarpLinkUri = UriParser::isWarpLinkUri,
-                    onLink = sink,
-                    resolve = ::resolveForCallback
-                )
-            }
+            session?.autoHandler?.unregister()
+            session = SdkSession.create(appContext, apiKey, options, ::resolveForCallback)
         }
-        // Reconfiguring abandons any in-flight check, so callers parked on it
-        // must be answered here. Leaving them queued would let the abandoned
-        // check deliver its result to callers that parked on a later one.
-        // They are answered with success(null), never a fabricated
-        // NotConfigured: the SDK is configured, and iOS answers the same way.
-        val abandoned = synchronized(lock) {
-            deferredCheckGeneration++
-            deferredCheckInFlight.set(false)
-            val snapshot = pendingDeferredCallbacks.toList()
-            pendingDeferredCallbacks.clear()
-            snapshot
-        }
-        abandoned.forEach { it(Result.success(null)) }
+        // Reconfiguring abandons any in-flight check. Its parked callers are
+        // answered with success(null), never a fabricated NotConfigured: the SDK
+        // is configured, and iOS answers the same way.
+        deferredChecks.abandon()
+
+        // An abandoned caller may have reconfigured, so the steps below read the
+        // session that is current now.
+        val live = synchronized(lock) { session } ?: return
 
         // Synchronous, and before automatic handling starts: a cold-start
         // intent is already waiting by the time configure() runs.
-        applyDeclaredLinkDomains(appContext, options.linkDomains, logger)
-
-        val currentStorage = synchronized(lock) { storage }
-        currentStorage?.cachedDomains?.let {
+        applyDeclaredLinkDomains(appContext, options.linkDomains, live.logger)
+        live.storage.cachedDomains?.let {
             if (it.isNotEmpty()) UriParser.setServerDomains(it)
         }
 
-        logger?.log("Configured with API key: ${Logger.maskApiKey(apiKey)}")
-        logger?.log("API endpoint: ${options.apiEndpoint}")
-        logger?.log("WarpLink SDK configured (v$SDK_VERSION)")
-        logBackupCaveat(appContext)
+        live.logger.log("Configured with API key: ${Logger.maskApiKey(apiKey)}")
+        live.logger.log("API endpoint: ${options.apiEndpoint}")
+        live.logger.log("WarpLink SDK configured (v$SDK_VERSION)")
+        logBackupCaveat(appContext, live.logger)
 
-        runServerValidation()
-        startAutomaticHandling()
+        performServerValidation(live.storage, live.apiClient, live.logger) {}
+        live.startAutomaticHandling(::checkDeferredDeepLink) { dispatchAutoDeferred(live.autoHandler, it) }
+        resumePendingInvitation()
     }
 
     /**
@@ -177,7 +124,7 @@ object WarpLink {
         uri: Uri,
         callback: (Result<WarpLinkDeepLink>) -> Unit
     ) {
-        val handler = synchronized(lock) { autoHandler }
+        val handler = synchronized(lock) { session?.autoHandler }
         if (handler != null && isWarpLinkUri(uri)) {
             handler.dispatchManual(uri, callback)
             return
@@ -212,17 +159,6 @@ object WarpLink {
     fun isWarpLinkUri(uri: Uri): Boolean = UriParser.isWarpLinkUri(uri)
 
     /**
-     * Single reader for [WarpLinkOptions.automaticDeepLinks], so the
-     * cold-start gate and the warm-start gate cannot drift apart. They already
-     * did once: cold start honoured the flag and warm start did not, which let
-     * an app that had opted out still receive automatic dispatch.
-     *
-     * False before [configure] runs: an unconfigured SDK dispatches nothing.
-     */
-    private val automaticDeepLinksEnabled: Boolean
-        get() = synchronized(lock) { options?.automaticDeepLinks == true }
-
-    /**
      * Warm-start bridge for the automatic model: call from your Activity's
      * `onNewIntent` so links that arrive while your task is already running
      * reach [WarpLinkOptions.onLink]. Requires `launchMode="singleTask"` (or
@@ -233,14 +169,13 @@ object WarpLink {
      * same way it routes cold-start ones: itself, via [handleDeepLink].
      */
     fun onNewIntent(intent: Intent) {
-        val handler = synchronized(lock) {
-            if (automaticDeepLinksEnabled) autoHandler else null
-        } ?: run {
+        val current = synchronized(lock) { session }
+        val handler = current?.takeIf { it.options.automaticDeepLinks }?.autoHandler ?: run {
             // Saying nothing here is the failure mode this model exists to
             // avoid. The documented integration is an unconditional one-liner,
             // so a host that turned the flag off in shared config would
             // otherwise watch warm-start links vanish with no explanation.
-            logger?.log(
+            current?.logger?.log(
                 "onNewIntent ignored: automatic deep link handling is off"
             )
             return
@@ -251,174 +186,93 @@ object WarpLink {
     fun checkDeferredDeepLink(
         callback: (Result<WarpLinkDeepLink?>) -> Unit
     ) {
-        if (!isConfigured) {
+        val inputs = synchronized(lock) { session }
+            ?.deferredCheckInputs(retrySettingsOverride ?: RetrySettings.DEFAULT)
+        if (inputs == null) {
             callback(Result.failure(WarpLinkError.NotConfigured))
             return
         }
-
-        val capturedStorage: Storage
-        val capturedFingerprintCollector: FingerprintCollector
-        val capturedApiClient: ApiClient
-        val capturedInstallReferrerReader: InstallReferrerReader?
-        val capturedLogger: Logger?
-        val capturedSettings: RetrySettings
-        synchronized(lock) {
-            capturedStorage = storage ?: return
-            capturedFingerprintCollector = fingerprintCollector ?: return
-            capturedApiClient = apiClient ?: return
-            capturedInstallReferrerReader = installReferrerReader
-            capturedLogger = logger
-            capturedSettings = retrySettingsOverride ?: RetrySettings.DEFAULT
-        }
-
-        if (capturedStorage.deferredCheckCompleted) {
-            capturedLogger?.log("Deferred check already completed, returning cached")
-            callback(Result.success(capturedStorage.cachedAttribution))
-            return
-        }
-        var generation = 0
-        val startsCheck = synchronized(lock) {
-            if (deferredCheckInFlight.compareAndSet(false, true)) {
-                generation = deferredCheckGeneration
-                true
-            } else {
-                pendingDeferredCallbacks.add(callback)
-                false
-            }
-        }
-        if (!startsCheck) {
-            capturedLogger?.log("Deferred check already in flight, awaiting its result")
-            return
-        }
-
-        performDeferredCheck(
-            capturedStorage,
-            capturedFingerprintCollector,
-            capturedApiClient,
-            capturedInstallReferrerReader,
-            capturedLogger,
-            isCurrentCheck = {
-                synchronized(lock) { generation == deferredCheckGeneration }
-            },
-            settings = capturedSettings
-        ) { result ->
-            val pending = synchronized(lock) {
-                if (generation != deferredCheckGeneration) {
-                    // Abandoned by a reconfigure: its parked callers were already
-                    // answered there, so touching the shared state now would
-                    // release the replacement check and steal its callbacks.
-                    emptyList()
-                } else {
-                    deferredCheckInFlight.set(false)
-                    val snapshot = pendingDeferredCallbacks.toList()
-                    pendingDeferredCallbacks.clear()
-                    snapshot
-                }
-            }
-            callback(result)
-            pending.forEach { it(result) }
-        }
+        deferredChecks.check(inputs, callback)
     }
 
     /**
-     * The device-seen marker lives in SharedPreferences and outlives an
-     * uninstall only because Auto Backup restores it. With backup off, a
-     * reinstall on this device is reported as a first install. Attribution
-     * itself is unaffected, so this is a debug line rather than a warning.
+     * Redeems an invitation the person pasted.
+     *
+     * Call this only from a user action, with text the person handed over. The
+     * SDK never reads the clipboard on its own. A referral link opened from the
+     * Play Store is redeemed without this call.
+     *
+     * - `success(link)`: the invitation matched. [link] is also cached as
+     *   [attributionResult].
+     * - `success(null)`: the text was not a WarpLink invitation, or it matched
+     *   nothing. Nothing is confirmed, so do not tell the person a referral was
+     *   applied.
+     * - `failure`: the invitation is invalid or expired (the message says how
+     *   to open the link again), or the network failed. After a network failure
+     *   the SDK keeps the invitation and tries again on a later launch, a
+     *   bounded number of times.
+     *
+     * Onboarding does not wait on this: skipping it, or any failure, leaves the
+     * app fully usable.
      */
-    private fun logBackupCaveat(appContext: Context) {
-        if (appContext.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP == 0) {
-            logger?.log(
-                "Auto Backup is disabled (android:allowBackup=false): a reinstall on " +
-                    "this device will be reported as a first install"
-            )
-        }
+    fun redeemInvitation(
+        text: String,
+        callback: (Result<WarpLinkDeepLink?>) -> Unit
+    ) {
+        ReferralEntry.redeem(text, referralContext(), callback)
+    }
+
+    /**
+     * Claims the referral behind this install for the person who just signed up.
+     *
+     * [installerId] is your own stable id for that person, 1 to 128 characters.
+     * Calling again with the same id is safe: the server answers the same claim
+     * again rather than crediting twice.
+     *
+     * [ReferralClaimStatus.NONE][app.warplink.referral.ReferralClaimStatus.NONE]
+     * is an ordinary answer, not an error: there was no referral to credit. The
+     * call fails only when it cannot reach the server, the key is refused, or
+     * [installerId] is empty or too long.
+     */
+    fun claimReferral(
+        installerId: String,
+        callback: (Result<ReferralClaimResult>) -> Unit
+    ) {
+        ReferralEntry.claim(installerId, referralContext(), callback)
+    }
+
+    private fun resumePendingInvitation() {
+        val handler = synchronized(lock) { session?.autoHandler }
+        ReferralEntry.resume(referralContext()) { dispatchAutoDeferred(handler, it) }
+    }
+
+    private fun referralContext(): ReferralContext? = synchronized(lock) {
+        val current = session ?: return null
+        ReferralContext(
+            apiClient = current.apiClient,
+            storage = current.storage,
+            logger = current.logger,
+            settings = retrySettingsOverride ?: RetrySettings.DEFAULT,
+            onMatch = { deferredChecks.recordMatch(current.storage, it) }
+        )
     }
 
     private fun resolveForCallback(
         uri: Uri,
         callback: (Result<WarpLinkDeepLink>) -> Unit
     ) {
-        val client: ApiClient
-        val log: Logger?
-        val settings: RetrySettings
-        synchronized(lock) {
-            client = apiClient ?: run {
-                callback(Result.failure(WarpLinkError.NotConfigured))
-                return
-            }
-            log = logger
-            settings = retrySettingsOverride ?: RetrySettings.DEFAULT
+        val current = synchronized(lock) { session }
+        if (current == null) {
+            callback(Result.failure(WarpLinkError.NotConfigured))
+            return
         }
         resolveDeepLink(
-            client,
-            log,
+            current.apiClient,
+            current.logger,
             uri,
-            settings = settings,
+            settings = retrySettingsOverride ?: RetrySettings.DEFAULT,
             callback = callback
         )
-    }
-
-    private fun runServerValidation() {
-        val currentStorage: Storage
-        val currentApiClient: ApiClient
-        val currentLogger: Logger?
-        synchronized(lock) {
-            currentStorage = storage ?: return
-            currentApiClient = apiClient ?: return
-            currentLogger = logger
-        }
-        performServerValidation(currentStorage, currentApiClient, currentLogger) { valid ->
-            synchronized(lock) { isApiKeyValid = valid }
-        }
-    }
-
-    /**
-     * One snapshot, so the two gates and the handler cannot come from different
-     * `configure` calls. This runs last in [configure], and [configure] answers
-     * an abandoned deferred caller inline before reaching it, so a host that
-     * reconfigures from that answer replaces all three behind this call. Taking
-     * no parameter is deliberate: one named `options` would shadow the field the
-     * [automaticDeepLinksEnabled] accessor reads, which is how the two gates
-     * came to be read from two different configurations.
-     */
-    private fun startAutomaticHandling() {
-        val enabled: Boolean
-        val deferred: Boolean
-        val handler: AutoLinkHandler?
-        synchronized(lock) {
-            enabled = automaticDeepLinksEnabled
-            deferred = options?.automaticDeferredDeepLinks == true
-            handler = autoHandler
-        }
-        if (enabled) {
-            if (handler != null) {
-                handler.registerColdStart()
-                logger?.log("Automatic cold-start deep link handling enabled")
-            } else {
-                logger?.log("automaticDeepLinks enabled but no onLink set; nothing to dispatch to")
-            }
-        }
-        if (deferred) {
-            // Deliver a completed deferred result at most once. Once the check
-            // has completed, a cached match stays readable via attributionResult
-            // but must NOT be re-pushed through onLink on every later launch
-            // (mirrors iOS runAutoDeferredCheck's !isAttributionComplete guard).
-            val alreadyCompleted =
-                synchronized(lock) { storage?.deferredCheckCompleted ?: false }
-            if (alreadyCompleted) {
-                logger?.log("Deferred check already completed; not re-dispatching to onLink")
-            } else {
-                // Fires with or without a sink: a bare configure(context, apiKey) is
-                // documented to attribute the install automatically, and the match is
-                // recorded server-side and cached locally either way. A manual caller
-                // that races this one is coalesced onto it rather than starved.
-                logger?.log("Auto-firing deferred deep link check")
-                checkDeferredDeepLink { result ->
-                    dispatchAutoDeferred(handler, result)
-                }
-            }
-        }
     }
 
     /**
@@ -433,10 +287,11 @@ object WarpLink {
         handler: AutoLinkHandler?,
         result: Result<WarpLinkDeepLink?>
     ) {
-        if (synchronized(lock) { autoHandler === handler }) {
+        val current = synchronized(lock) { session }
+        if (current?.autoHandler === handler) {
             handler?.dispatchDeferred(result)
         } else {
-            logger?.log(
+            current?.logger?.log(
                 "Deferred check abandoned; not dispatching to the superseded onLink"
             )
         }
@@ -445,21 +300,11 @@ object WarpLink {
     @VisibleForTesting
     internal fun reset() {
         synchronized(lock) {
-            autoHandler?.unregister()
-            autoHandler = null
-            apiKey = null
-            options = null
-            logger = null
-            storage = null
-            apiClient = null
-            fingerprintCollector = null
-            installReferrerReader = null
-            isApiKeyValid = null
+            session?.autoHandler?.unregister()
+            session = null
             retrySettingsOverride = null
-            pendingDeferredCallbacks.clear()
-            deferredCheckGeneration++
         }
-        deferredCheckInFlight.set(false)
+        deferredChecks.reset()
         UriParser.resetKnownDomains()
     }
 

@@ -80,7 +80,7 @@ import com.google.firebase.dynamiclinks.PendingDynamicLinkData
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.1.1")
+    implementation("app.warplink:sdk:1.2.0")
 }
 ```
 

@@ -24,7 +24,9 @@ internal class LoopbackJsonServer(
      * because a refusal reaches the client on `errorStream` rather than
      * `inputStream` and a stub that can only answer 200 cannot exercise it.
      */
-    private val status: Int = 200
+    private val status: Int = 200,
+    /** Extra response header lines, for example `Retry-After: 1`. */
+    private val extraHeaders: List<String> = emptyList()
 ) {
 
     private val socket = ServerSocket(0, 1, InetAddress.getByName(LOOPBACK))
@@ -164,6 +166,35 @@ internal class LoopbackJsonServer(
         }
     }
 
+    /** One scripted answer for [serveReplies]. */
+    data class Reply(val status: Int, val body: String, val headers: List<String> = emptyList())
+
+    /**
+     * Answer each request with its own [Reply], in arrival order, from ONE
+     * thread. For a flow whose requests must get different answers, such as a
+     * token refused and then an ordinary match.
+     */
+    fun serveReplies(vararg replies: Reply) {
+        thread(isDaemon = true, name = "warplink-loopback-replies") {
+            for (reply in replies) {
+                val connection = try {
+                    socket.accept()
+                } catch (_: SocketException) {
+                    return@thread
+                }
+                connection.use {
+                    drainRequest(it.getInputStream())
+                    requestReceived.countDown()
+                    pauseBeforeAnswer()
+                    it.getOutputStream().apply {
+                        write(httpResponse(reply.status, reply.body, reply.headers).toByteArray())
+                        flush()
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * The Boolean spelling of [serveScript], for the tests that only need
      * "dropped" or "answered" and read better that way.
@@ -263,16 +294,23 @@ internal class LoopbackJsonServer(
         if (answerDelayMs > 0) Thread.sleep(answerDelayMs)
     }
 
-    private fun httpResponse() =
+    private fun httpResponse(
+        status: Int = this.status,
+        body: String = this.body,
+        headers: List<String> = extraHeaders
+    ) =
         "HTTP/1.1 $status ${reasonPhrase(status)}\r\n" +
             "Content-Type: application/json\r\n" +
+            headers.joinToString("") { "$it\r\n" } +
             "$CONTENT_LENGTH ${body.toByteArray().size}\r\n" +
             "Connection: close\r\n\r\n" + body
 
     private fun reasonPhrase(status: Int) = when (status) {
         200 -> "OK"
+        400 -> "Bad Request"
         403 -> "Forbidden"
         404 -> "Not Found"
+        503 -> "Service Unavailable"
         else -> "Status"
     }
 

@@ -136,6 +136,23 @@ class ApiClientAttributionBodyTest {
         assertFalse(body.has("app_package_name"))
     }
 
+    @Test
+    fun `recovery_token rides next to the referrer and the signals`() {
+        val signals = DeviceSignals("en-US", -300, "America/Toronto")
+        val body = client.buildAttributionBody(
+            signals, "1.2.0", null, linkId, false, recoveryToken = "tok_-AbC9"
+        )
+        assertEquals("tok_-AbC9", body.getString("recovery_token"))
+        assertEquals(linkId, body.getString("referrer"))
+        assertEquals("enriched_tz", body.getString("fingerprint_version"))
+    }
+
+    @Test
+    fun `recovery_token is omitted when the referrer carried none`() {
+        val body = client.buildAttributionBody(null, "1.2.0", null, linkId)
+        assertFalse(body.has("recovery_token"))
+    }
+
     private companion object {
         const val PACKAGE_NAME = "com.example.myapp"
     }

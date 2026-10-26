@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0]
+
+### Added
+
+- **Referral handoff.** The Play Install Referrer can carry a one-time
+  recovery token (`wl_rt`) next to the link id. The SDK redeems it first, on its
+  own, for an exact match, and keeps every other referrer parameter your app
+  already uses. A token the server refuses is dropped and the first-launch check
+  goes on with the link id and the device signals. A token the server cannot
+  confirm yet (`503`) ends the check without completing it, so the next launch
+  tries the same referrer again.
+- **`WarpLink.redeemInvitation(text, callback)`.** Redeems an invitation the
+  person pasted. Text that is not an invitation sends nothing. An invitation
+  past its expiry is refused on the device. A refused invitation fails with
+  `WarpLinkError.ServerError` (status `400`) and a message that says how to open
+  the invitation link again. An invitation the server cannot confirm yet is kept
+  on the device and finished on a later launch. The SDK never reads the
+  clipboard.
+- **A retry stays the original.** The SDK keeps one id with each recovery
+  token and sends it on every redeem of that token. After a lost response, the
+  next launch reads `replayState = ORIGINAL` for the person's own install.
+- **`WarpLink.claimReferral(installerId, callback)`.** Credits the referral
+  behind the install to the person who signed up. Idempotent. The status
+  `NONE` is an ordinary answer, not an error.
+- **Evidence on `WarpLinkDeepLink`.** New fields with safe defaults:
+  `attributionId`, `matchMethod`, `evidenceClass`, `replayState`,
+  `capturedParams` and `tappedAt`. A match made from a link id alone reports
+  `evidenceClass = LEGACY_LINK` and `matchMethod = LINK_OPEN`.
+
+### Compatibility
+
+- Source compatible. No existing signature changed and no `WarpLinkError` subclass
+  was added, so existing `when` expressions keep compiling.
+- **Upgrade note.** `WarpLinkDeepLink` has six new constructor parameters
+  (`attributionId`, `matchMethod`, `evidenceClass`, `replayState`,
+  `capturedParams`, `tappedAt`), all with defaults. The constructor and `copy()`
+  signatures change. Code that calls them with named or default arguments
+  compiles as before. Code that destructures the class gets six more
+  `componentN()` functions. A library or module compiled against 1.1.x that
+  builds or copies a `WarpLinkDeepLink`, such as a test fake, must be recompiled
+  against 1.2.0.
+- A link match cached by an earlier version still reads as a match, with the new
+  fields at their defaults.
+- The pending invitation and the data a claim needs live in `noBackupFilesDir`,
+  so a restore or a reinstall never replays an old invitation.
+
 ## [1.1.1] - 2026-10-10
 
 ### Changed

@@ -1,6 +1,8 @@
 package app.warplink.internal
 
 import app.warplink.WarpLinkDeepLink
+import app.warplink.internal.referral.ReferrerTokenOutcome
+import app.warplink.internal.referral.redeemReferrerToken
 
 /**
  * @param isCurrentCheck reports whether this check is still the SDK's live one.
@@ -22,7 +24,7 @@ internal fun performDeferredCheck(
 ) {
     // This check supersedes any older one, whose attempt would otherwise go on
     // holding its connection for the rest of its readTimeout.
-    cancelInFlightAttributionMatch()
+    cancelInFlightAttributionMatch(MatchSlot.DEFERRED_CHECK)
 
     if (storage.deferredCheckCompleted) {
         val cached = storage.cachedAttribution
@@ -69,7 +71,7 @@ private fun tryReferrerThenFallback(
     reader.readReferrer { referrerResult ->
         val read = referrerResult.getOrNull()
         if (read != null) {
-            logger?.log("Referrer found: ${read.linkId}")
+            logger?.log("Referrer found: ${read.linkId ?: "recovery token only"}")
             matchWithReferrer(
                 read, fingerprintCollector, apiClient, storage,
                 logger, isCurrentCheck, settings, callback
@@ -96,11 +98,42 @@ private fun matchWithReferrer(
     settings: RetrySettings,
     callback: (Result<WarpLinkDeepLink?>) -> Unit
 ) {
+    val routeMatches = read.isRoutable(System.currentTimeMillis() / 1000)
+    // A recovery token is redeemed alone first: see redeemReferrerToken.
+    redeemReferrerToken(
+        read.recoveryToken, apiClient, storage, settings, isCurrentCheck
+    ) { outcome ->
+        when (outcome) {
+            is ReferrerTokenOutcome.Matched -> handleAttributionResponse(
+                outcome.response, storage, logger, isCurrentCheck,
+                routeMatches = routeMatches, callback = callback
+            )
+            is ReferrerTokenOutcome.Retry -> callback(Result.failure(outcome.error))
+            ReferrerTokenOutcome.FallThrough -> matchWithLinkId(
+                read, fingerprintCollector, apiClient, storage,
+                logger, isCurrentCheck, settings, routeMatches, callback
+            )
+        }
+    }
+}
+
+private fun matchWithLinkId(
+    read: ReferrerRead,
+    fingerprintCollector: FingerprintCollector,
+    apiClient: ApiClient,
+    storage: Storage,
+    logger: Logger?,
+    isCurrentCheck: () -> Boolean,
+    settings: RetrySettings,
+    routeMatches: Boolean,
+    callback: (Result<WarpLinkDeepLink?>) -> Unit
+) {
     // deviceId is left null on Android: there is no privacy-safe IDFV analog
     // (ANDROID_ID is disclaimed in the SDK privacy docs), and the Play Install
-    // Referrer is the deterministic primary path here.
+    // Referrer is the deterministic primary path here. The token is not sent
+    // again: redeemReferrerToken already settled it.
     matchWithRetry(
-        apiClient, settings, isCurrentCheck,
+        apiClient, MatchSlot.DEFERRED_CHECK, settings, isCurrentCheck,
         fingerprintCollector.collect(),
         referrer = read.linkId,
         isReinstall = storage.isReinstall
@@ -109,8 +142,7 @@ private fun matchWithReferrer(
         attrResult.onSuccess { response ->
             handleAttributionResponse(
                 response, storage, logger, isCurrentCheck,
-                routeMatches = read.isRoutable(System.currentTimeMillis() / 1000),
-                callback = callback
+                routeMatches = routeMatches, callback = callback
             )
         }
     }
@@ -129,7 +161,7 @@ private fun collectAndMatch(
     // more: a degraded signal set still produces a request, and a request that
     // misses is recorded server-side where an abandoned one is not.
     matchWithRetry(
-        apiClient, settings, isCurrentCheck,
+        apiClient, MatchSlot.DEFERRED_CHECK, settings, isCurrentCheck,
         fingerprintCollector.collect(),
         referrer = null,
         isReinstall = storage.isReinstall
@@ -143,43 +175,4 @@ private fun collectAndMatch(
             )
         }
     }
-}
-
-private fun handleAttributionResponse(
-    response: AttributionResponse,
-    storage: Storage,
-    logger: Logger?,
-    isCurrentCheck: () -> Boolean,
-    routeMatches: Boolean = true,
-    callback: (Result<WarpLinkDeepLink?>) -> Unit
-) {
-    if (handleIfAbandoned(isCurrentCheck, logger, callback)) return
-    if (response.matched && !routeMatches) {
-        settleWithoutRouting(storage, logger, callback)
-        return
-    }
-    val deepLink = routableDeepLink(response)
-
-    // A confirmed no-match settles attribution: the server looked and found
-    // nothing. A match with nothing to route to does not, whatever the server
-    // called it. It is discarded above and the host is told nothing matched, so
-    // completing the check on it spends this install's one attempt on an answer
-    // nobody can act on, and nothing would retry: deferredCheckCompleted
-    // outlives every relaunch and only a reinstall clears it.
-    if (deepLink == null && response.matched) {
-        logger?.log(
-            "Attribution matched with nothing to route to, retrying next launch"
-        )
-        callback(Result.success(null))
-        return
-    }
-
-    storage.deferredCheckCompleted = true
-    storage.cachedAttribution = deepLink
-    if (deepLink != null) {
-        logger?.log("Deferred deep link matched: ${deepLink.linkId}")
-    } else {
-        logger?.log("No deferred deep link match")
-    }
-    callback(Result.success(deepLink))
 }

@@ -4,6 +4,8 @@ import android.os.Handler
 import android.os.Looper
 import app.warplink.WarpLink
 import app.warplink.WarpLinkError
+import app.warplink.internal.referral.ReferralEvidenceFields
+import app.warplink.internal.referral.referralFailureOrNull
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -35,11 +37,11 @@ internal fun interface ApiKeyValidating {
 internal class ApiClient(
     private val apiKey: String,
     private val baseURL: String,
-    private val packageName: String? = null
+    internal val packageName: String? = null
 ) : ApiKeyValidating, RetryScheduler {
 
-    private val executor = Executors.newCachedThreadPool()
-    private val mainHandler = Handler(Looper.getMainLooper())
+    internal val executor = Executors.newCachedThreadPool()
+    internal val mainHandler = Handler(Looper.getMainLooper())
 
     /**
      * The delay is scheduled on the main handler because it is the only timer
@@ -177,6 +179,7 @@ internal class ApiClient(
         deviceId: String?,
         referrer: String? = null,
         isReinstall: Boolean,
+        recoveryToken: String? = null,
         tapId: String? = null,
         timeoutMs: Int? = null,
         callback: (Result<AttributionResponse>) -> Unit
@@ -193,14 +196,16 @@ internal class ApiClient(
                 attempt.open(conn)
                 try {
                     writeBody(conn, buildAttributionBody(
-                        signals, sdkVersion, deviceId, referrer, isReinstall
+                        signals, sdkVersion, deviceId, referrer, isReinstall, recoveryToken
                     ))
                     when (conn.responseCode) {
                         200 -> Result.success(parseAttribution(conn))
                         401, 403 -> Result.failure(
                             WarpLinkError.InvalidApiKey
                         )
-                        else -> Result.failure(unexpectedStatus(conn))
+                        else -> Result.failure(
+                            conn.referralFailureOrNull() ?: unexpectedStatus(conn)
+                        )
                     }
                 } finally {
                     conn.disconnect()
@@ -216,7 +221,7 @@ internal class ApiClient(
         return Cancellable { attempt.cancel() }
     }
 
-    private fun makeConnection(
+    internal fun makeConnection(
         path: String,
         method: String = "GET",
         tapId: String? = null,
@@ -243,7 +248,7 @@ internal class ApiClient(
         return conn
     }
 
-    private fun writeBody(
+    internal fun writeBody(
         conn: HttpURLConnection,
         body: JSONObject
     ) {
@@ -339,7 +344,8 @@ internal class ApiClient(
             destinationUrl = json.optStringOrNull("destination_url"),
             customParams = json.optJSONObject("custom_params")
                 ?.let { parseCustomParams(it) },
-            installId = json.optStringOrNull("install_id")
+            installId = json.optStringOrNull("install_id"),
+            evidence = ReferralEvidenceFields.fromJson(json)
         )
     }
 
@@ -352,7 +358,8 @@ internal class ApiClient(
         // Defaulted here, unlike matchAttribution, whose callers must answer.
         // The only production caller is matchAttribution itself, and that hop is
         // covered end to end, so the default serves tests about other fields.
-        isReinstall: Boolean = false
+        isReinstall: Boolean = false,
+        recoveryToken: String? = null
     ): JSONObject {
         val body = JSONObject()
         body.put("platform", "android")
@@ -373,6 +380,9 @@ internal class ApiClient(
         }
         if (referrer != null) {
             body.put("referrer", referrer)
+        }
+        if (recoveryToken != null) {
+            body.put("recovery_token", recoveryToken)
         }
         // Signals ride alongside the referrer. When the referrer names a deleted
         // or foreign link, the server's cascade falls through to the raw signals

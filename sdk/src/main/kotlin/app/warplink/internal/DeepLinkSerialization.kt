@@ -2,6 +2,9 @@ package app.warplink.internal
 
 import app.warplink.MatchType
 import app.warplink.WarpLinkDeepLink
+import app.warplink.internal.referral.cachedEvidence
+import app.warplink.internal.referral.putEvidenceOf
+import app.warplink.internal.referral.withEvidence
 import org.json.JSONObject
 
 /**
@@ -18,7 +21,7 @@ internal fun serializeDeepLink(deepLink: WarpLinkDeepLink): JSONObject {
     json.put("matchConfidence", deepLink.matchConfidence ?: JSONObject.NULL)
     json.put("matchGuaranteed", deepLink.matchGuaranteed)
     json.put("customParams", JSONObject(deepLink.customParams))
-    return json
+    return json.putEvidenceOf(deepLink)
 }
 
 internal fun deserializeDeepLink(json: JSONObject): WarpLinkDeepLink {
@@ -43,7 +46,7 @@ internal fun deserializeDeepLink(json: JSONObject): WarpLinkDeepLink {
         matchConfidence = matchConfidence,
         matchGuaranteed = json.optBoolean("matchGuaranteed", false),
         customParams = customParams
-    )
+    ).withEvidence(json.cachedEvidence())
 }
 
 private fun parseCustomParams(json: JSONObject?): Map<String, Any> {
