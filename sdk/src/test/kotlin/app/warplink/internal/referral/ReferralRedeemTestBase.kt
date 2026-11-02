@@ -42,9 +42,9 @@ abstract class ReferralRedeemTestBase {
     internal fun stub(status: Int = 200) =
         LoopbackJsonServer("{}", status = status).also { stubs.add(it) }
 
-    private fun contextFor(server: LoopbackJsonServer) = ReferralContext(
+    internal fun contextFor(server: LoopbackJsonServer) = ReferralContext(
         ApiClient(API_KEY, server.baseUrl), storage, null, RetrySettings.NO_WAIT,
-    ) { matches.add(it) }
+    ) { matches.add(it); {} }
 
     internal fun redeem(server: LoopbackJsonServer, text: String): Result<WarpLinkDeepLink?> =
         await { done -> ReferralRedeemer.redeem(text, contextFor(server), done) }

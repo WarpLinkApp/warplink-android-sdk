@@ -1,5 +1,6 @@
 package app.warplink.internal.referral
 
+import app.warplink.internal.KeyEnvironment
 import org.json.JSONObject
 import java.io.File
 
@@ -30,9 +31,12 @@ internal data class ReferralEvidence(
  * read-change-write under one lock, so two writers cannot overwrite each other
  * and the check inside [clearToken] still holds when it writes.
  */
-internal class ReferralEvidenceStore(directory: File) {
+internal class ReferralEvidenceStore(
+    directory: File,
+    environment: KeyEnvironment = KeyEnvironment.PRODUCTION,
+) {
 
-    private val file = InstallJsonFile(directory, FILE_NAME)
+    private val file = InstallJsonFile(directory, environment.scoped(FILE_BASE, ".json"))
     private val lock = Any()
 
     fun evidence(): ReferralEvidence = synchronized(lock) { read() }
@@ -64,7 +68,8 @@ internal class ReferralEvidenceStore(directory: File) {
         }
     }
 
-    fun clear() = synchronized(lock) { file.delete() }
+    /** True when the record is gone. */
+    fun clear(): Boolean = synchronized(lock) { file.delete() }
 
     private fun update(change: (ReferralEvidence) -> ReferralEvidence) = synchronized(lock) {
         write(change(read()))
@@ -89,7 +94,7 @@ internal class ReferralEvidenceStore(directory: File) {
     }
 
     private companion object {
-        const val FILE_NAME = "warplink_referral_evidence.json"
+        const val FILE_BASE = "warplink_referral_evidence"
         const val KEY_INSTALL = "install_id"
         const val KEY_TOKEN = "recovery_token"
         const val KEY_EXPIRES = "recovery_token_expires_at"

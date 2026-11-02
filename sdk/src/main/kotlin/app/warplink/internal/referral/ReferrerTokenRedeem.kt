@@ -59,7 +59,12 @@ internal fun redeemReferrerToken(
         tapId = storage.referral.referrerTap.tapIdFor(invitation.token),
         isReinstall = storage.isReinstall,
     ) { result ->
-        deliver(outcomeOf(result, invitation, storage.referral))
+        deliver(
+            synchronized(storage.stateLock) {
+                if (isCurrentCheck()) outcomeOf(result, invitation, storage.referral)
+                else ReferrerTokenOutcome.FallThrough
+            }
+        )
     }
 }
 

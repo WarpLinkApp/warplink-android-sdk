@@ -1,5 +1,6 @@
 package app.warplink.internal.referral
 
+import app.warplink.internal.KeyEnvironment
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -17,9 +18,12 @@ import java.util.UUID
  * to the install that wrote it. Every read-change-write runs under one lock,
  * so [clearIfHolding] is atomic against a newer [tapIdFor].
  */
-internal class ReferrerTapStore(directory: File) {
+internal class ReferrerTapStore(
+    directory: File,
+    environment: KeyEnvironment = KeyEnvironment.PRODUCTION,
+) {
 
-    private val file = InstallJsonFile(directory, FILE_NAME)
+    private val file = InstallJsonFile(directory, environment.scoped(FILE_BASE, ".json"))
     private val lock = Any()
 
     /**
@@ -44,10 +48,11 @@ internal class ReferrerTapStore(directory: File) {
         if (file.read()?.optString(KEY_TOKEN, "") == token) file.delete()
     }
 
-    fun clear() = synchronized(lock) { file.delete() }
+    /** True when the record is gone. */
+    fun clear(): Boolean = synchronized(lock) { file.delete() }
 
     private companion object {
-        const val FILE_NAME = "warplink_referral_referrer_tap.json"
+        const val FILE_BASE = "warplink_referral_referrer_tap"
         const val KEY_TOKEN = "token"
         const val KEY_TAP = "tap_id"
     }

@@ -52,7 +52,7 @@ abstract class ReferralClaimTestBase {
     ): Result<ReferralClaimResult> {
         val context = ReferralContext(
             ApiClient(API_KEY, server.baseUrl), storage, null, RetrySettings.NO_WAIT,
-        ) { }
+        ) { {} }
         val done = CountDownLatch(1)
         var result: Result<ReferralClaimResult>? = null
         ReferralClaimer.claim(installerId, context) { result = it; done.countDown() }

@@ -40,7 +40,7 @@ internal class SdkSession(
             return SdkSession(
                 options = options,
                 logger = logger,
-                storage = Storage(context),
+                storage = Storage(context, KeyEnvironment.of(apiKey)),
                 apiClient = ApiClient(apiKey, options.apiEndpoint, context.packageName),
                 fingerprintCollector = FingerprintCollector(),
                 installReferrerReader = InstallReferrerReader(context, logger),

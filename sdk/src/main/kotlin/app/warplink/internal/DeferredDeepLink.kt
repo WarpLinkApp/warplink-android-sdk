@@ -38,10 +38,18 @@ internal fun performDeferredCheck(
     // Mark that we tried, but do NOT consume the completion flag here — it is
     // set only when the server gives a definitive response (see
     // handleAttributionResponse), so an offline attempt retries next launch.
-    if (storage.deferredCheckAttempted) {
-        logger?.log("Retrying deferred check after a previous failed attempt")
+    val retried = storage.deferredCheckAttempted
+    val abandoned = synchronized(storage.stateLock) {
+        val stale = !isCurrentCheck()
+        if (!stale) storage.deferredCheckAttempted = true
+        stale
     }
-    storage.deferredCheckAttempted = true
+    if (abandoned) {
+        logger?.log("Deferred check abandoned before it started")
+        callback(Result.success(null))
+        return
+    }
+    if (retried) logger?.log("Retrying deferred check after a previous failed attempt")
 
     if (installReferrerReader != null) {
         logger?.log("First launch: trying Play Install Referrer")

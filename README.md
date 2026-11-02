@@ -18,7 +18,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.2.0")
+    implementation("app.warplink:sdk:1.3.0")
 }
 ```
 
@@ -88,6 +88,10 @@ default and the forward works. Set it to `false` and this line becomes a
 no-op, because you have taken over routing with `handleDeepLink`.
 
 That's the whole integration. Deep links, deferred deep links, and attribution now work.
+
+## Testing a first install
+
+A `wl_test_` key keeps its attribution state apart from `wl_live_` state on the same device. Use a Test key in debug builds. To test a first install again without uninstalling the app, call `WarpLink.clearAttribution()` with a Test key. It clears the attribution stored on the device and starts a new check. It does nothing with a live key.
 
 ## Disabling any piece
 

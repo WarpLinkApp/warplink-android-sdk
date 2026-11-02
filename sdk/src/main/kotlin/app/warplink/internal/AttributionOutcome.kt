@@ -34,18 +34,11 @@ internal fun handleIfAbandoned(
  * is wrong, and so is caching it for attributionResult to replay, so the check
  * settles with nothing.
  */
-internal fun settleWithoutRouting(
-    storage: Storage,
-    logger: Logger?,
-    callback: (Result<WarpLinkDeepLink?>) -> Unit
-) {
+private fun logNotRouted(logger: Logger?) {
     logger?.log(
         "Attribution recorded for an install that began more than " +
             "${ReferrerRead.ROUTABLE_INSTALL_AGE_SECONDS / 86_400} days ago; not routing a deferred link that old"
     )
-    storage.deferredCheckCompleted = true
-    storage.cachedAttribution = null
-    callback(Result.success(null))
 }
 
 /** The response as something the host can actually route, or null if it is not. */
@@ -71,6 +64,11 @@ internal fun routableDeepLink(response: AttributionResponse): WarpLinkDeepLink? 
     ).withEvidence(response.evidence)
 }
 
+/**
+ * Settles one check's answer. The currentness check and every write it guards
+ * are one `stateLock` hold, so a clear lands wholly before or after them and an
+ * abandoned check refills nothing.
+ */
 internal fun handleAttributionResponse(
     response: AttributionResponse,
     storage: Storage,
@@ -79,34 +77,41 @@ internal fun handleAttributionResponse(
     routeMatches: Boolean = true,
     callback: (Result<WarpLinkDeepLink?>) -> Unit
 ) {
-    if (handleIfAbandoned(isCurrentCheck, logger, callback)) return
-    if (response.matched && !routeMatches) {
-        settleWithoutRouting(storage, logger, callback)
-        return
-    }
     val deepLink = routableDeepLink(response)
-
-    // A confirmed no-match settles attribution: the server looked and found
-    // nothing. A match with nothing to route to does not, whatever the server
-    // called it. It is discarded above and the host is told nothing matched, so
-    // completing the check on it spends this install's one attempt on an answer
-    // nobody can act on, and nothing would retry: deferredCheckCompleted
-    // outlives every relaunch and only a reinstall clears it.
-    if (deepLink == null && response.matched) {
-        logger?.log(
-            "Attribution matched with nothing to route to, retrying next launch"
-        )
-        callback(Result.success(null))
-        return
+    // The currentness check and the writes it guards are one lock hold with
+    // `Storage.clearAttribution`, so a clear lands wholly before or after them.
+    val outcome = synchronized(storage.stateLock) {
+        when {
+            !isCurrentCheck() -> AttributionOutcome.ABANDONED
+            response.matched && !routeMatches -> {
+                storage.deferredCheckCompleted = true
+                storage.cachedAttribution = null
+                AttributionOutcome.NOT_ROUTED
+            }
+            // A confirmed no-match settles attribution: the server looked and
+            // found nothing. A match with nothing to route to does not, whatever
+            // the server called it: completing the check on it would spend this
+            // install's one attempt on an answer nobody can act on, and nothing
+            // would retry, since deferredCheckCompleted outlives every relaunch
+            // and only a reinstall clears it.
+            deepLink == null && response.matched -> AttributionOutcome.UNROUTABLE
+            else -> {
+                storage.deferredCheckCompleted = true
+                storage.cachedAttribution = deepLink
+                storage.referral.evidence.rememberInstall(response.installId)
+                AttributionOutcome.SETTLED
+            }
+        }
     }
-
-    storage.deferredCheckCompleted = true
-    storage.cachedAttribution = deepLink
-    storage.referral.evidence.rememberInstall(response.installId)
-    if (deepLink != null) {
-        logger?.log("Deferred deep link matched: ${deepLink.linkId}")
-    } else {
-        logger?.log("No deferred deep link match")
+    when (outcome) {
+        AttributionOutcome.ABANDONED -> logger?.log("Deferred check abandoned, discarding its response")
+        AttributionOutcome.NOT_ROUTED -> logNotRouted(logger)
+        AttributionOutcome.UNROUTABLE ->
+            logger?.log("Attribution matched with nothing to route to, retrying next launch")
+        AttributionOutcome.SETTLED ->
+            logger?.log(deepLink?.let { "Deferred deep link matched: ${it.linkId}" } ?: "No deferred deep link match")
     }
-    callback(Result.success(deepLink))
+    callback(Result.success(if (outcome == AttributionOutcome.SETTLED) deepLink else null))
 }
+
+private enum class AttributionOutcome { ABANDONED, NOT_ROUTED, UNROUTABLE, SETTLED }

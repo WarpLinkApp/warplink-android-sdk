@@ -1,5 +1,6 @@
 package app.warplink.internal.referral
 
+import app.warplink.internal.KeyEnvironment
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -11,11 +12,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * install that wrote it, so a restore or a reinstall never replays an old
  * invitation.
  */
-internal class ReferralStores(directory: File) {
+internal class ReferralStores(
+    directory: File,
+    environment: KeyEnvironment = KeyEnvironment.PRODUCTION,
+) {
 
-    val pending = ReferralPendingStore(directory)
-    val evidence = ReferralEvidenceStore(directory)
-    val referrerTap = ReferrerTapStore(directory)
+    val pending = ReferralPendingStore(directory, environment)
+    val evidence = ReferralEvidenceStore(directory, environment)
+    val referrerTap = ReferrerTapStore(directory, environment)
 
     /** Seconds since the epoch. Replaced only by tests. */
     @Volatile
@@ -32,10 +36,33 @@ internal class ReferralStores(directory: File) {
 
     fun endRedeem() = redeemInFlight.set(false)
 
+    /**
+     * Counts the times redeems started so far were retired. A run captures it
+     * at start and writes only while it still matches, so an answer that lands
+     * after a clear or a reconfigure refills nothing.
+     */
+    @Volatile
+    var epoch: Int = 0
+        private set
+
+    /** Retires every redeem started so far. Their answers are dropped. */
+    @Synchronized
+    fun orphanRedeems() {
+        epoch++
+    }
+
+    /**
+     * Deletes the records and retires the redeems running now. Does not free
+     * the redeem claim: the retired run still holds it and releases it itself,
+     * so it cannot release a newer run's claim. True when every record is gone.
+     */
+    fun clearRecords(): Boolean {
+        orphanRedeems()
+        return listOf(pending.clear(), evidence.clear(), referrerTap.clear()).all { it }
+    }
+
     fun clear() {
-        pending.clear()
-        evidence.clear()
-        referrerTap.clear()
+        clearRecords()
         redeemInFlight.set(false)
     }
 }

@@ -27,8 +27,8 @@ internal class DeferredCheckInputs(
  * callbacks, and applies nothing to storage (see `performDeferredCheck`'s
  * `isCurrentCheck`).
  *
- * Its own lock guards the three fields, and the storage write of `recordMatch`
- * that must not be seen apart from the abandonment. It is never held across a
+ * Its own lock guards the three fields. It is taken inside `storage.stateLock`
+ * (see [Storage.stateLock]), never the other way round, and never held across a
  * callback.
  */
 internal class DeferredCheckCoordinator {
@@ -71,8 +71,17 @@ internal class DeferredCheckCoordinator {
      * the abandoned check deliver its result to callers that parked on a later one.
      */
     fun abandon() {
+        abandonStaged()()
+    }
+
+    /**
+     * Abandons the check in flight now and returns the step that answers its
+     * parked callers with success(null). The caller runs that step after it
+     * has released its own locks, so no host callback runs under them.
+     */
+    fun abandonStaged(): () -> Unit {
         val waiting = release()
-        waiting.forEach { it(Result.success(null)) }
+        return { waiting.forEach { it(Result.success(null)) } }
     }
 
     /** Abandons the check in flight and drops its parked callers unanswered. */
@@ -87,16 +96,24 @@ internal class DeferredCheckCoordinator {
      * link and overwrite the cache. A caller parked on it gets the exact match.
      */
     fun recordMatch(storage: Storage, link: WarpLinkDeepLink) {
-        // One lock hold: a check that asks `isCurrent` sees either the world
-        // before the match or the world after it (stored and abandoned), never
-        // a stored match with the check still current.
-        val waiting = synchronized(lock) {
-            storage.deferredCheckCompleted = true
-            storage.cachedAttribution = link
-            release()
+        synchronized(storage.stateLock) { stageMatch(storage, link) }()
+    }
+
+    /**
+     * Stores [link] and abandons the check in flight, and returns the step that
+     * cancels its request and answers its parked callers. The caller holds
+     * `storage.stateLock`, so a check that asks `isCurrent` sees either the world
+     * before the match or the world after it, never a stored match with the
+     * check still current. It runs the returned step after releasing its locks.
+     */
+    fun stageMatch(storage: Storage, link: WarpLinkDeepLink): () -> Unit {
+        storage.deferredCheckCompleted = true
+        storage.cachedAttribution = link
+        val waiting = release()
+        return {
+            cancelInFlightAttributionMatch(MatchSlot.DEFERRED_CHECK)
+            waiting.forEach { it(Result.success(link)) }
         }
-        cancelInFlightAttributionMatch(MatchSlot.DEFERRED_CHECK)
-        waiting.forEach { it(Result.success(link)) }
     }
 
     /** The generation this check runs under, or null after parking [callback] on the running one. */

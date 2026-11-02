@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 /**
  * Deleting the domain cache write in performServerValidation kept the suite
@@ -75,5 +76,19 @@ class ServerValidationCacheTest {
         )
 
         assertEquals(listOf("keep.me"), Storage(context).cachedDomains)
+    }
+
+    @Test
+    fun `an answer that is no longer current writes nothing`() {
+        performServerValidation(
+            storage = storage,
+            apiClient = validating(ValidateResponse(valid = true, domains = listOf("stale.acme.com"))),
+            logger = null,
+            ifCurrent = { },
+            onResult = { }
+        )
+
+        assertEquals(emptyList(), Storage(context).cachedDomains)
+        assertNull(Storage(context).apiKeyValidatedAt)
     }
 }

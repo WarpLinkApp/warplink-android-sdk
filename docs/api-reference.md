@@ -15,7 +15,7 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-val SDK_VERSION: String // "1.2.0"
+val SDK_VERSION: String // "1.3.0"
 ```
 
 The current SDK version string.
@@ -438,7 +438,7 @@ sealed class WarpLinkError(
 | `InvalidUrl` | The URI is not a recognized WarpLink App Link (host is not `aplnk.to` or a verified custom domain). |
 | `LinkNotFound` | The link was not found (404) or is no longer active. |
 | `PasswordRequired` | The link is password protected, so it resolves to no destination and no platform URLs. |
-| `DecodingError(cause: Throwable)` | Response parsing failed. |
+| `DecodingError(cause: Throwable)` | Response parsing failed. `clearAttribution()` also fails with it, with the cause message "Could not clear stored attribution data.", when a stored item could not be deleted. |
 
 Use exhaustive `when` for handling:
 

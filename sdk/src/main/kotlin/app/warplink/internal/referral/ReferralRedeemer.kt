@@ -45,7 +45,7 @@ internal object ReferralRedeemer {
         if (!context.stores.beginRedeem()) {
             // Kept for the next launch: the run in flight must not be the last
             // word on an invitation the person has since replaced.
-            context.stores.pending.save(record)
+            savePendingIfCurrent(record, context)
             context.logger?.log("A referral redeem is already running, kept this invitation for later")
             callback(Result.success(null))
             return
@@ -75,7 +75,12 @@ internal object ReferralRedeemer {
         val record = held.copy(attempts = held.attempts + 1)
         // Written before the send, so a kill mid-request still counts the
         // attempt and the token survives for the next launch.
-        context.stores.pending.save(record)
+        if (!savePendingIfCurrent(record, context)) {
+            context.logger?.log("Referral redeem retired before it started, sending nothing")
+            context.stores.endRedeem()
+            callback(Result.success(null))
+            return
+        }
         matchWithRetry(
             context.apiClient, MatchSlot.REDEEM, context.settings, { true },
             signals = null,
@@ -84,26 +89,54 @@ internal object ReferralRedeemer {
             tapId = record.tapId,
             isReinstall = context.storage.isReinstall,
         ) { result ->
-            val outcome = finish(result, record, context)
+            val settled = finish(result, record, context)
             context.stores.endRedeem()
-            callback(outcome)
+            settled.notifyWaiting()
+            callback(settled.outcome)
         }
     }
 
+    /**
+     * Saves [record] unless a clear or a reconfigure retired [context], and says
+     * whether [context] was current. The check and the write are one `stateLock`
+     * hold, the lock a clear holds, so a call that paused before the clear
+     * cannot save after it.
+     */
+    private fun savePendingIfCurrent(record: PendingRedemption, context: ReferralContext): Boolean =
+        synchronized(context.storage.stateLock) {
+            val current = !context.isRetired
+            if (current) context.stores.pending.save(record)
+            current
+        }
+
+    /** A redeem's answer, and the step that tells the callers a match released. */
+    private class Settled(
+        val outcome: Result<WarpLinkDeepLink?>,
+        val notifyWaiting: () -> Unit = {},
+    )
+
+    /**
+     * Applies the answer while the run is still current. The currentness check
+     * and every write it guards are one `stateLock` hold, so a clear lands
+     * wholly before or after them and a retired run refills nothing.
+     */
     private fun finish(
         result: Result<AttributionResponse>,
         record: PendingRedemption,
         context: ReferralContext,
-    ): Result<WarpLinkDeepLink?> {
+    ): Settled = synchronized(context.storage.stateLock) {
+        if (context.isRetired) {
+            context.logger?.log("Referral redeem retired, discarding its answer")
+            return@synchronized Settled(Result.success(null))
+        }
         result.onSuccess { response ->
             context.stores.pending.clearIfHolding(record.token)
-            return Result.success(apply(response, record, context))
+            return@synchronized apply(response, record, context)
         }
         val error = result.exceptionOrNull() ?: WarpLinkError.NetworkError(IllegalStateException("no result"))
         settleFailure(error, record, context)
-        return Result.failure(error)
+        Settled(Result.failure(error))
     }
-
     /**
      * A refusal ends the record: the same token would be refused again. Any
      * other failure, a 503 that says the token is not confirmed yet included,
@@ -121,16 +154,16 @@ internal object ReferralRedeemer {
         response: AttributionResponse,
         record: PendingRedemption,
         context: ReferralContext,
-    ): WarpLinkDeepLink? {
+    ): Settled {
         val invitation = ReferralInvitation(record.token, record.expiresAtSeconds)
         recordReferralEvidence(context.stores, response, invitation)
         val matched = routableDeepLink(response)
         if (matched == null) {
             context.logger?.log("Invitation redeemed, no link to route to")
-            return null
+            return Settled(Result.success(null))
         }
-        context.onMatch(matched)
+        val notifyWaiting = context.onMatch(matched)
         context.logger?.log("Invitation redeemed: ${matched.linkId}")
-        return matched
+        return Settled(Result.success(matched), notifyWaiting)
     }
 }

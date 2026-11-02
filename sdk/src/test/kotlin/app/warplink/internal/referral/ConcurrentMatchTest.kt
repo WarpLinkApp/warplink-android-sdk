@@ -37,7 +37,7 @@ class ConcurrentMatchTest : ReferralRedeemTestBase() {
         var redeemAnswer: Result<WarpLinkDeepLink?>? = null
         val redeemContext = ReferralContext(
             ApiClient(API_KEY, redeemServer.baseUrl), storage, null, HELD,
-        ) { }
+        ) { {} }
         ReferralRedeemer.redeem(validToken(), redeemContext) { redeemAnswer = it }
         assertTrue(redeemServer.awaitRequests(1), "the redeem never reached the wire")
 

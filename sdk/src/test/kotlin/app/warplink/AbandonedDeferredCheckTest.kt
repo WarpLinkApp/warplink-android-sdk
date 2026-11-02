@@ -56,16 +56,18 @@ class AbandonedDeferredCheckTest {
 
         val done = CountDownLatch(1)
         var result: Result<WarpLinkDeepLink?>? = null
+        val current = java.util.concurrent.atomic.AtomicBoolean(true)
         performDeferredCheck(
             storage, FingerprintCollector(), apiClient(),
             null, null,
-            isCurrentCheck = { false }
+            isCurrentCheck = { current.get() }
         ) { r ->
             result = r
             done.countDown()
         }
 
         assertTrue(api.requestReceived.await(10, TimeUnit.SECONDS))
+        current.set(false)
         // While this check was in flight a reconfigure abandoned it, and the
         // replacement found the install this one created and cached a real match.
         storage.cachedAttribution = MATCH

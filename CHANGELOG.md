@@ -5,7 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-02
+
+### Added
+
+- **`WarpLink.clearAttribution()`.** With a `wl_test_` key it clears the
+  attribution stored on the device (the cached match, the attempt and
+  completion markers, and any held referral invitation) and runs a new
+  attribution check when `automaticDeferredDeepLinks` is on, so a developer can
+  test a first install again without deleting the app. A check already on the
+  wire when you call it is discarded and cannot refill what was cleared. Only
+  the device is cleared: server records are not deleted. It returns a failure
+  with `WarpLinkError.DecodingError` (cause message "Could not clear stored
+  attribution data.") when a stored item could not be deleted and some state
+  may remain. With a `wl_live_` key it does
+  nothing and returns success. Before `configure` it fails with
+  `WarpLinkError.NotConfigured`.
+
+### Changed
+
+- **Test and live state are kept apart on the device.** The SDK picks a
+  storage namespace from the key prefix before it reads any state. A
+  `wl_test_` key uses its own preferences file, install markers and referral
+  files, so a Test build never reads or clears what a live build on the same
+  device stored. Live keys, and any other key prefix, keep the names earlier
+  releases used, so state written by 1.2.0 carries over. Switching keys at
+  runtime replaces the cached link domains and retires referral redeems that
+  the earlier key started.
 
 ## [1.2.0]
 

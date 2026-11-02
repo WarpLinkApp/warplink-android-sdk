@@ -4,19 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
-import app.warplink.internal.AutoLinkHandler
-import app.warplink.internal.DeferredCheckCoordinator
-import app.warplink.internal.Logger
 import app.warplink.internal.RetrySettings
-import app.warplink.internal.SdkSession
 import app.warplink.internal.UriParser
-import app.warplink.internal.applyDeclaredLinkDomains
-import app.warplink.internal.logBackupCaveat
-import app.warplink.internal.performServerValidation
-import app.warplink.internal.referral.ReferralContext
+import app.warplink.internal.WarpLinkRuntime
 import app.warplink.internal.referral.ReferralEntry
-import app.warplink.internal.resolveDeepLink
-import app.warplink.internal.startAutomaticHandling
 
 object WarpLink {
 
@@ -29,37 +20,30 @@ object WarpLink {
      */
     val SDK_VERSION: String = BuildConfig.SDK_VERSION
 
-    private val lock = Any()
-    private var session: SdkSession? = null
-    private val deferredChecks = DeferredCheckCoordinator()
+    private val runtime = WarpLinkRuntime()
 
     /**
-     * Retry settings for the two funnels this facade drives, overridden only by tests.
-     *
-     * `internal`, so it is invisible to consumers, and nullable so the shipped default is
-     * the absence of an override rather than a copy of it. A facade-level test that needs
-     * a retry to actually happen sets `RetrySettings.NO_WAIT` here, because the retry's
-     * wait is a `postDelayed` and a test that does not move the clock would otherwise wait
-     * for a timer that never comes due. Cleared by [reset] so one test cannot leak it into
-     * the next.
+     * Retry settings for the funnels this facade drives, overridden only by tests.
+     * Cleared by [reset] so one test cannot leak it into the next.
      */
     @VisibleForTesting
-    internal var retrySettingsOverride: RetrySettings? = null
+    internal var retrySettingsOverride: RetrySettings?
+        get() = runtime.retrySettingsOverride
+        set(value) { runtime.retrySettingsOverride = value }
 
     val isConfigured: Boolean
-        get() = synchronized(lock) { session != null }
+        get() = runtime.isConfigured
 
     /** Cached attribution result from the last deferred deep link check, or null if none. */
     val attributionResult: WarpLinkDeepLink?
-        get() = synchronized(lock) { session?.storage?.cachedAttribution }
+        get() = runtime.attributionResult
 
     /**
      * Whether the deferred attribution check has definitively completed for this
      * install. The React Native bridge reads this so a deferred match reaches
      * `onLink` at most once across launches, matching the native auto-dispatch guard.
      */
-    fun isAttributionComplete(): Boolean =
-        synchronized(lock) { session?.storage?.deferredCheckCompleted ?: false }
+    fun isAttributionComplete(): Boolean = runtime.isAttributionComplete
 
     /**
      * Configure the SDK. With a bare call the SDK automatically handles
@@ -72,46 +56,24 @@ object WarpLink {
         context: Context,
         apiKey: String,
         options: WarpLinkOptions = WarpLinkOptions()
-    ) {
-        val appContext = context.applicationContext
-        if (!KEY_REGEX.matches(apiKey)) {
-            Logger(options.debugLogging).warn(
-                "Invalid API key format; WarpLink not configured. " +
-                    "Expected wl_(live|test)_<32 alphanumeric characters>."
-            )
-            options.onLink?.invoke(Result.failure(WarpLinkError.InvalidApiKeyFormat))
-            return
-        }
+    ) = runtime.configure(context, apiKey, options)
 
-        synchronized(lock) {
-            session?.autoHandler?.unregister()
-            session = SdkSession.create(appContext, apiKey, options, ::resolveForCallback)
-        }
-        // Reconfiguring abandons any in-flight check. Its parked callers are
-        // answered with success(null), never a fabricated NotConfigured: the SDK
-        // is configured, and iOS answers the same way.
-        deferredChecks.abandon()
-
-        // An abandoned caller may have reconfigured, so the steps below read the
-        // session that is current now.
-        val live = synchronized(lock) { session } ?: return
-
-        // Synchronous, and before automatic handling starts: a cold-start
-        // intent is already waiting by the time configure() runs.
-        applyDeclaredLinkDomains(appContext, options.linkDomains, live.logger)
-        live.storage.cachedDomains?.let {
-            if (it.isNotEmpty()) UriParser.setServerDomains(it)
-        }
-
-        live.logger.log("Configured with API key: ${Logger.maskApiKey(apiKey)}")
-        live.logger.log("API endpoint: ${options.apiEndpoint}")
-        live.logger.log("WarpLink SDK configured (v$SDK_VERSION)")
-        logBackupCaveat(appContext, live.logger)
-
-        performServerValidation(live.storage, live.apiClient, live.logger) {}
-        live.startAutomaticHandling(::checkDeferredDeepLink) { dispatchAutoDeferred(live.autoHandler, it) }
-        resumePendingInvitation()
-    }
+    /**
+     * Forgets this install's attribution so the next first launch can be tested
+     * again: the cached match, the completed and attempted gates, the device-seen
+     * flag and the referral records. A check in flight is abandoned and its late
+     * answer writes nothing. The key validation and link domains are kept.
+     *
+     * Test only. With a `wl_live_` key this does nothing and succeeds, so it can
+     * never erase a live install's attribution. With automatic deferred deep
+     * links on, a fresh check starts.
+     *
+     * - `success`: the state is cleared, or a live key made this a no-op.
+     * - `failure`: [WarpLinkError.NotConfigured] before [configure], or
+     *   [WarpLinkError.DecodingError] when a file or preference could not be
+     *   deleted and some state may remain.
+     */
+    fun clearAttribution(): Result<Unit> = runtime.clearAttribution()
 
     /**
      * Resolve an App Link URI. Optional in the opt-out model — cold start is
@@ -123,14 +85,7 @@ object WarpLink {
     fun handleDeepLink(
         uri: Uri,
         callback: (Result<WarpLinkDeepLink>) -> Unit
-    ) {
-        val handler = synchronized(lock) { session?.autoHandler }
-        if (handler != null && isWarpLinkUri(uri)) {
-            handler.dispatchManual(uri, callback)
-            return
-        }
-        resolveForCallback(uri, callback)
-    }
+    ) = runtime.handleDeepLink(uri, callback)
 
     /**
      * Whether [uri] is a WarpLink link this SDK would claim: a host in the known
@@ -168,32 +123,11 @@ object WarpLink {
      * sink is configured. An app that opted out routes warm-start links the
      * same way it routes cold-start ones: itself, via [handleDeepLink].
      */
-    fun onNewIntent(intent: Intent) {
-        val current = synchronized(lock) { session }
-        val handler = current?.takeIf { it.options.automaticDeepLinks }?.autoHandler ?: run {
-            // Saying nothing here is the failure mode this model exists to
-            // avoid. The documented integration is an unconditional one-liner,
-            // so a host that turned the flag off in shared config would
-            // otherwise watch warm-start links vanish with no explanation.
-            current?.logger?.log(
-                "onNewIntent ignored: automatic deep link handling is off"
-            )
-            return
-        }
-        intent.data?.let { handler.dispatch(it) }
-    }
+    fun onNewIntent(intent: Intent) = runtime.onNewIntent(intent.data)
 
     fun checkDeferredDeepLink(
         callback: (Result<WarpLinkDeepLink?>) -> Unit
-    ) {
-        val inputs = synchronized(lock) { session }
-            ?.deferredCheckInputs(retrySettingsOverride ?: RetrySettings.DEFAULT)
-        if (inputs == null) {
-            callback(Result.failure(WarpLinkError.NotConfigured))
-            return
-        }
-        deferredChecks.check(inputs, callback)
-    }
+    ) = runtime.checkDeferred(callback)
 
     /**
      * Redeems an invitation the person pasted.
@@ -219,7 +153,7 @@ object WarpLink {
         text: String,
         callback: (Result<WarpLinkDeepLink?>) -> Unit
     ) {
-        ReferralEntry.redeem(text, referralContext(), callback)
+        ReferralEntry.redeem(text, runtime.referralContext(), callback)
     }
 
     /**
@@ -238,75 +172,9 @@ object WarpLink {
         installerId: String,
         callback: (Result<ReferralClaimResult>) -> Unit
     ) {
-        ReferralEntry.claim(installerId, referralContext(), callback)
-    }
-
-    private fun resumePendingInvitation() {
-        val handler = synchronized(lock) { session?.autoHandler }
-        ReferralEntry.resume(referralContext()) { dispatchAutoDeferred(handler, it) }
-    }
-
-    private fun referralContext(): ReferralContext? = synchronized(lock) {
-        val current = session ?: return null
-        ReferralContext(
-            apiClient = current.apiClient,
-            storage = current.storage,
-            logger = current.logger,
-            settings = retrySettingsOverride ?: RetrySettings.DEFAULT,
-            onMatch = { deferredChecks.recordMatch(current.storage, it) }
-        )
-    }
-
-    private fun resolveForCallback(
-        uri: Uri,
-        callback: (Result<WarpLinkDeepLink>) -> Unit
-    ) {
-        val current = synchronized(lock) { session }
-        if (current == null) {
-            callback(Result.failure(WarpLinkError.NotConfigured))
-            return
-        }
-        resolveDeepLink(
-            current.apiClient,
-            current.logger,
-            uri,
-            settings = retrySettingsOverride ?: RetrySettings.DEFAULT,
-            callback = callback
-        )
-    }
-
-    /**
-     * Route an auto-fired deferred result to [handler], but only while it is
-     * still the SDK's current sink. A check abandoned by a reconfigure stays
-     * silent to the host: routing its result to the previous configure's `onLink`
-     * would either navigate twice for one install (the replacement check
-     * dispatches to the new sink) or push a spurious failure at a host that
-     * merely reconfigured.
-     */
-    private fun dispatchAutoDeferred(
-        handler: AutoLinkHandler?,
-        result: Result<WarpLinkDeepLink?>
-    ) {
-        val current = synchronized(lock) { session }
-        if (current?.autoHandler === handler) {
-            handler?.dispatchDeferred(result)
-        } else {
-            current?.logger?.log(
-                "Deferred check abandoned; not dispatching to the superseded onLink"
-            )
-        }
+        ReferralEntry.claim(installerId, runtime.referralContext(), callback)
     }
 
     @VisibleForTesting
-    internal fun reset() {
-        synchronized(lock) {
-            session?.autoHandler?.unregister()
-            session = null
-            retrySettingsOverride = null
-        }
-        deferredChecks.reset()
-        UriParser.resetKnownDomains()
-    }
-
-    private val KEY_REGEX = Regex("^wl_(live|test)_[a-zA-Z0-9]{32}$")
+    internal fun reset() = runtime.reset()
 }

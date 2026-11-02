@@ -24,6 +24,17 @@ internal fun SdkSession.startAutomaticHandling(
             logger.log("automaticDeepLinks enabled but no onLink set; nothing to dispatch to")
         }
     }
+    fireAutomaticDeferredCheck(checkDeferred, onDeferred)
+}
+
+/**
+ * Runs the automatic deferred check when the options ask for it and this
+ * install has not completed one. Also the restart after `clearAttribution`.
+ */
+internal fun SdkSession.fireAutomaticDeferredCheck(
+    checkDeferred: ((Result<WarpLinkDeepLink?>) -> Unit) -> Unit,
+    onDeferred: (Result<WarpLinkDeepLink?>) -> Unit,
+) {
     if (!options.automaticDeferredDeepLinks) return
     // A completed deferred result is delivered at most once. A cached match
     // stays readable via attributionResult but is not re-pushed through onLink

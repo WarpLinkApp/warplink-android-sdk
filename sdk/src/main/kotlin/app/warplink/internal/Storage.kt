@@ -5,10 +5,29 @@ import android.content.SharedPreferences
 import app.warplink.WarpLinkDeepLink
 import app.warplink.internal.referral.ReferralStores
 
-internal class Storage(context: Context) {
+/**
+ * The device state of one key [environment]. Test and Production keep separate
+ * preferences, markers and referral records, so a `wl_test_` build never reads,
+ * writes or clears what a live build stored on the same device.
+ */
+internal class Storage(
+    context: Context,
+    val environment: KeyEnvironment = KeyEnvironment.PRODUCTION,
+) {
+
+    /**
+     * Held while a check or redeem decides it is still current and writes its
+     * result, and while [clearAttribution] clears. The two can never interleave,
+     * so a late answer cannot refill cleared state. Never held across a host
+     * callback.
+     */
+    val stateLock = Any()
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.getSharedPreferences(environment.scoped(StorageKeys.PREFS_NAME), Context.MODE_PRIVATE)
+
+    private val completedMarker = environment.scoped(StorageKeys.MARKER_DEFERRED_COMPLETED)
+    private val attemptedMarker = environment.scoped(StorageKeys.MARKER_DEFERRED_ATTEMPTED)
 
     // Two stores with deliberately opposite lifetimes, and which one a flag
     // lives in IS its meaning. Install-scoped markers die with the install (see
@@ -18,7 +37,7 @@ internal class Storage(context: Context) {
     private val markers = InstallMarkerStore(context)
 
     /** The referral handoff's records: install-scoped, like [markers]. */
-    val referral = ReferralStores(context.noBackupFilesDir)
+    val referral = ReferralStores(context.noBackupFilesDir, environment)
 
     // Read once, at construction, so every decision below sees the same
     // answer for the life of this instance (see InstallProvenance).
@@ -28,15 +47,11 @@ internal class Storage(context: Context) {
         // A cached match with an open gate is a ghost. The two are written
         // together on a definitive response, and only Auto Backup can bring the
         // cache back without the gate. Left alone, attributionResult replays the
-        // previous install's match until the new check lands.
-        // `isReinstall`, not `!deferredCheckCompleted`. The broad form also fires on a
-        // genuine first install whose gate is simply still open, which review U2 warns
-        // against and which breaks StorageCachedAttributionTest's
-        // `testCachedResultSurvivesReinstantiation`. `isReinstall` is already
-        // `deviceHasCompletedAttribution && !deferredCheckCompleted` (the `isReinstall` getter),
-        // which is exactly U2's condition.
-        if (isReinstall && prefs.contains(KEY_CACHED_ATTRIBUTION)) {
-            prefs.edit().remove(KEY_CACHED_ATTRIBUTION).apply()
+        // previous install's match until the new check lands. `isReinstall`, not
+        // `!deferredCheckCompleted`: the broad form also fires on a genuine first
+        // install whose gate is simply still open.
+        if (isReinstall && prefs.contains(StorageKeys.CACHED_ATTRIBUTION)) {
+            prefs.edit().remove(StorageKeys.CACHED_ATTRIBUTION).apply()
         }
     }
 
@@ -51,7 +66,7 @@ internal class Storage(context: Context) {
         // a single byte left the device, so the flag proves only that a check
         // began. It is deliberately not read: gating on it locked every
         // upgrading install out of attribution permanently.
-        get() = markers.isSet(MARKER_DEFERRED_COMPLETED) || fallbackGateCoversThisInstall()
+        get() = markers.isSet(completedMarker) || fallbackGateCoversThisInstall()
         set(value) {
             if (value) markCheckCompleted() else clearGate()
         }
@@ -63,7 +78,7 @@ internal class Storage(context: Context) {
      * not match, so it cannot gate the new install (WL-S15).
      */
     private fun fallbackGateCoversThisInstall(): Boolean =
-        prefs.getLong(KEY_GATE_FALLBACK_INSTALL_TIME, NO_FALLBACK) == firstInstallTime
+        prefs.getLong(StorageKeys.GATE_FALLBACK_INSTALL_TIME, NO_FALLBACK) == firstInstallTime
 
     /**
      * Whether a deferred check has been started at least once. Set at the start
@@ -71,8 +86,8 @@ internal class Storage(context: Context) {
      * Retained so a failed attempt is distinguishable from a never-run one.
      */
     var deferredCheckAttempted: Boolean
-        get() = markers.isSet(MARKER_DEFERRED_ATTEMPTED)
-        set(value) { markers.set(MARKER_DEFERRED_ATTEMPTED, value) }
+        get() = markers.isSet(attemptedMarker)
+        set(value) { markers.set(attemptedMarker, value) }
 
     /**
      * Whether THIS DEVICE has ever completed WarpLink attribution for this app,
@@ -84,7 +99,7 @@ internal class Storage(context: Context) {
      * must die with its install, so one marker cannot do both jobs.
      */
     val deviceHasCompletedAttribution: Boolean
-        get() = prefs.getBoolean(KEY_DEVICE_SEEN_ATTRIBUTION, false)
+        get() = prefs.getBoolean(StorageKeys.DEVICE_SEEN_ATTRIBUTION, false)
 
     /**
      * Whether the install running now is a reinstall: attribution completed on
@@ -100,15 +115,13 @@ internal class Storage(context: Context) {
 
     var apiKeyValidatedAt: Long?
         get() {
-            val value = prefs.getLong(KEY_API_KEY_VALIDATED_AT, -1L)
+            val value = prefs.getLong(StorageKeys.API_KEY_VALIDATED_AT, -1L)
             return if (value == -1L) null else value
         }
         set(value) {
-            if (value != null) {
-                prefs.edit().putLong(KEY_API_KEY_VALIDATED_AT, value).apply()
-            } else {
-                prefs.edit().remove(KEY_API_KEY_VALIDATED_AT).apply()
-            }
+            val edit = prefs.edit()
+            if (value != null) edit.putLong(StorageKeys.API_KEY_VALIDATED_AT, value) else edit.remove(StorageKeys.API_KEY_VALIDATED_AT)
+            edit.apply()
         }
 
     val isApiKeyValidationCacheValid: Boolean
@@ -127,9 +140,7 @@ internal class Storage(context: Context) {
         get() = readCachedAttribution(prefs)
         set(value) = writeCachedAttribution(prefs, value)
 
-    fun clearCachedAttribution() {
-        prefs.edit().remove(KEY_CACHED_ATTRIBUTION).apply()
-    }
+    fun clearCachedAttribution() = prefs.edit().remove(StorageKeys.CACHED_ATTRIBUTION).apply()
 
     /**
      * Wipe every WarpLink flag from both stores. This models a device that has
@@ -138,8 +149,28 @@ internal class Storage(context: Context) {
      */
     fun clearAll() {
         prefs.edit().clear().apply()
-        markers.clear(MARKER_DEFERRED_COMPLETED, MARKER_DEFERRED_ATTEMPTED)
+        markers.clear(completedMarker, attemptedMarker)
         referral.clear()
+    }
+
+    /**
+     * Forgets this install's attribution so the next check starts fresh: the
+     * cached result, both gates, the device-seen flag and the referral records.
+     * Keeps the key validation and the link domains, which belong to the key.
+     * Retires the referral redeems running now.
+     *
+     * Returns false when a marker or a preference could not be deleted, so the
+     * caller never reports a clear that did not happen.
+     */
+    fun clearAttribution(): Boolean = synchronized(stateLock) {
+        val prefsCleared = prefs.edit()
+            .remove(StorageKeys.CACHED_ATTRIBUTION)
+            .remove(StorageKeys.GATE_FALLBACK_INSTALL_TIME)
+            .remove(StorageKeys.DEVICE_SEEN_ATTRIBUTION)
+            .commit()
+        val markersCleared = markers.clear(completedMarker, attemptedMarker)
+        val referralCleared = referral.clearRecords()
+        prefsCleared && markersCleared && referralCleared
     }
 
     /**
@@ -150,25 +181,19 @@ internal class Storage(context: Context) {
      * reinstall looking like a first install on this device.
      */
     private fun markCheckCompleted() {
-        if (!markers.set(MARKER_DEFERRED_COMPLETED, true)) {
-            prefs.edit().putLong(KEY_GATE_FALLBACK_INSTALL_TIME, firstInstallTime).apply()
+        if (!markers.set(completedMarker, true)) {
+            prefs.edit().putLong(StorageKeys.GATE_FALLBACK_INSTALL_TIME, firstInstallTime).apply()
         }
-        prefs.edit().putBoolean(KEY_DEVICE_SEEN_ATTRIBUTION, true).apply()
+        prefs.edit().putBoolean(StorageKeys.DEVICE_SEEN_ATTRIBUTION, true).apply()
     }
 
     private fun clearGate() {
-        markers.set(MARKER_DEFERRED_COMPLETED, false)
-        prefs.edit().remove(KEY_GATE_FALLBACK_INSTALL_TIME).apply()
+        markers.set(completedMarker, false)
+        prefs.edit().remove(StorageKeys.GATE_FALLBACK_INSTALL_TIME).apply()
     }
 
-    companion object {
-        private const val PREFS_NAME = "warplink_prefs"
-        private const val KEY_API_KEY_VALIDATED_AT = "api_key_validated_at"
-        private const val KEY_DEVICE_SEEN_ATTRIBUTION = "device_seen_attribution"
-        private const val KEY_GATE_FALLBACK_INSTALL_TIME = "deferred_completed_for_install"
-        private const val NO_FALLBACK = -1L
-        private const val MARKER_DEFERRED_COMPLETED = "warplink_deferred_completed"
-        private const val MARKER_DEFERRED_ATTEMPTED = "warplink_deferred_attempted"
-        private const val VALIDATION_CACHE_DURATION_MS = 24 * 60 * 60 * 1000L
+    private companion object {
+        const val NO_FALLBACK = -1L
+        const val VALIDATION_CACHE_DURATION_MS = 24 * 60 * 60 * 1000L
     }
 }

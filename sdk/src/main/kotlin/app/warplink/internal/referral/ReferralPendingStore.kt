@@ -1,5 +1,6 @@
 package app.warplink.internal.referral
 
+import app.warplink.internal.KeyEnvironment
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -36,9 +37,12 @@ internal data class PendingRedemption(
  * install that kept it. Every read-change-write runs under one lock, so
  * [clearIfHolding] is atomic against a newer [save].
  */
-internal class ReferralPendingStore(directory: File) {
+internal class ReferralPendingStore(
+    directory: File,
+    environment: KeyEnvironment = KeyEnvironment.PRODUCTION,
+) {
 
-    private val file = InstallJsonFile(directory, FILE_NAME)
+    private val file = InstallJsonFile(directory, environment.scoped(FILE_BASE, ".json"))
     private val lock = Any()
 
     fun load(): PendingRedemption? = synchronized(lock) {
@@ -74,10 +78,11 @@ internal class ReferralPendingStore(directory: File) {
         if (load()?.token == token) file.delete()
     }
 
-    fun clear() = synchronized(lock) { file.delete() }
+    /** True when the record is gone. */
+    fun clear(): Boolean = synchronized(lock) { file.delete() }
 
     private companion object {
-        const val FILE_NAME = "warplink_referral_pending.json"
+        const val FILE_BASE = "warplink_referral_pending"
         const val KEY_TOKEN = "token"
         const val KEY_EXPIRES = "expires_at"
         const val KEY_ATTEMPTS = "attempts"

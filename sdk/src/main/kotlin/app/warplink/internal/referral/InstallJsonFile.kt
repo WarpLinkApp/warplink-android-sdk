@@ -46,13 +46,16 @@ internal class InstallJsonFile(directory: File, name: String) {
         false
     }
 
-    fun delete() {
-        try {
-            target.delete()
-            temp.delete()
-        } catch (_: SecurityException) {
-            // A locked-down container cannot delete: the record then stays,
-            // and its own expiry and attempt count still bound it.
-        }
+    /**
+     * True when the record and its temporary file are gone. False when a
+     * locked-down container refused either delete: the record then stays, and
+     * its own expiry and attempt count still bound it.
+     */
+    fun delete(): Boolean = try {
+        val tempGone = temp.delete() || !temp.exists()
+        val targetGone = target.delete() || !target.exists()
+        tempGone && targetGone
+    } catch (_: SecurityException) {
+        false
     }
 }

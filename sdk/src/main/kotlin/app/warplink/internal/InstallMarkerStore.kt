@@ -26,9 +26,8 @@ internal class InstallMarkerStore(context: Context) {
     fun set(name: String, present: Boolean): Boolean =
         if (present) write(name) else delete(name)
 
-    fun clear(vararg names: String) {
-        names.forEach { file(it).delete() }
-    }
+    /** True when every named marker is gone. */
+    fun clear(vararg names: String): Boolean = names.map { delete(it) }.all { it }
 
     private fun write(name: String): Boolean = try {
         val target = file(name)
@@ -36,10 +35,8 @@ internal class InstallMarkerStore(context: Context) {
     } catch (_: Exception) {
         // Not IOException: File.createNewFile() can throw an unchecked
         // SecurityException on exactly the locked-down container this
-        // fallback exists for (review A5 asks for the broad catch).
-        // Reported, not swallowed: Storage mirrors the gate elsewhere when this
-        // store cannot hold it. Silently returning re-ran the check, re-sent the
-        // request and re-routed the user on every launch.
+        // fallback exists for. Reported, not swallowed: Storage mirrors the
+        // gate elsewhere when this store cannot hold it.
         false
     }
 

@@ -11,11 +11,8 @@ import org.json.JSONObject
  * abstraction: they take `prefs` directly rather than a `Storage` so they stay
  * simple free functions instead of a second class with its own lifetime.
  */
-internal const val KEY_CACHED_DOMAINS = "cached_domains"
-internal const val KEY_CACHED_ATTRIBUTION = "cached_attribution"
-
 internal fun readDomains(prefs: SharedPreferences): List<String> {
-    val raw = prefs.getString(KEY_CACHED_DOMAINS, null) ?: return emptyList()
+    val raw = prefs.getString(StorageKeys.CACHED_DOMAINS, null) ?: return emptyList()
     return try {
         val array = JSONArray(raw)
         (0 until array.length())
@@ -28,11 +25,11 @@ internal fun readDomains(prefs: SharedPreferences): List<String> {
 internal fun writeDomains(prefs: SharedPreferences, value: List<String>) {
     val array = JSONArray()
     value.forEach { array.put(it) }
-    prefs.edit().putString(KEY_CACHED_DOMAINS, array.toString()).apply()
+    prefs.edit().putString(StorageKeys.CACHED_DOMAINS, array.toString()).apply()
 }
 
 internal fun readCachedAttribution(prefs: SharedPreferences): WarpLinkDeepLink? {
-    val json = prefs.getString(KEY_CACHED_ATTRIBUTION, null)
+    val json = prefs.getString(StorageKeys.CACHED_ATTRIBUTION, null)
         ?: return null
     return try {
         deserializeDeepLink(JSONObject(json))
@@ -43,9 +40,9 @@ internal fun readCachedAttribution(prefs: SharedPreferences): WarpLinkDeepLink? 
 
 internal fun writeCachedAttribution(prefs: SharedPreferences, value: WarpLinkDeepLink?) {
     if (value == null) {
-        prefs.edit().remove(KEY_CACHED_ATTRIBUTION).apply()
+        prefs.edit().remove(StorageKeys.CACHED_ATTRIBUTION).apply()
         return
     }
     val json = serializeDeepLink(value)
-    prefs.edit().putString(KEY_CACHED_ATTRIBUTION, json.toString()).apply()
+    prefs.edit().putString(StorageKeys.CACHED_ATTRIBUTION, json.toString()).apply()
 }
