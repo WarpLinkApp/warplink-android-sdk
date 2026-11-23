@@ -15,7 +15,7 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-val SDK_VERSION: String // "1.4.0"
+val SDK_VERSION: String // "1.4.1"
 ```
 
 The current SDK version string.

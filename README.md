@@ -18,7 +18,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.4.0")
+    implementation("app.warplink:sdk:1.4.1")
 }
 ```
 
@@ -147,6 +147,10 @@ Or declare it in `AndroidManifest.xml`, inside `<application>`, with no code cha
 ```
 
 Both are optional and both are additive: your organization's verified domains still load from the server as before. See [Custom link domains](docs/api-reference.md#custom-link-domains).
+
+## Tether
+
+Tether is an iOS feature: it carries a link through an install with the clipboard, and Android reads no clipboard. On Android the SDK uses the Play Install Referrer for the same job, so no extra code is needed. How Tether works: [warplink.app/docs/tether](https://warplink.app/docs/tether).
 
 ## Documentation
 

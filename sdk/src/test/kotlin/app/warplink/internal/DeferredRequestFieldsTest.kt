@@ -87,7 +87,7 @@ class DeferredRequestFieldsTest {
     @Test
     fun `WL-S58 a match request from a redeem carries the installation id but no attempt number`() {
         val body = ApiClient(LIVE_KEY, "http://127.0.0.1:1").buildAttributionBody(
-            signals = null, sdkVersion = "1.4.0", deviceId = null, referrer = null,
+            signals = null, sdkVersion = "1.4.1", deviceId = null, referrer = null,
             installationId = UUID.randomUUID().toString(),
         )
 
@@ -147,7 +147,7 @@ class DeferredRequestFieldsTest {
     fun `WL-S73 the body trims the referrer, cuts it to 512 characters and omits an empty one`() {
         val client = ApiClient(LIVE_KEY, "http://127.0.0.1:1")
         fun sent(value: String?) = client.buildAttributionBody(
-            signals = null, sdkVersion = "1.4.0", deviceId = null, referrer = null, installReferrer = value,
+            signals = null, sdkVersion = "1.4.1", deviceId = null, referrer = null, installReferrer = value,
         )
 
         assertEquals("utm_medium=organic", sent("  utm_medium=organic\n").getString("install_referrer"))
