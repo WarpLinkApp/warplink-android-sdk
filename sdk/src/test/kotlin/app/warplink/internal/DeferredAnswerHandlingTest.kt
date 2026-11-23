@@ -44,7 +44,7 @@ class DeferredAnswerHandlingTest {
 
         // The main looper is never idled here, so the hand-off to the host cannot
         // have run. This is a process killed between the answer and the callback.
-        pollUntil("the gate was never saved") { storage.deferredCheckCompleted }
+        pollUntil("the gate was never saved") { synchronized(storage.stateLock) { storage.deferredCheckCompleted } }
 
         assertFalse(answered, "the host callback must still be waiting for the main thread")
         assertEquals("lnk_early", storage.cachedAttribution?.linkId)
@@ -59,7 +59,7 @@ class DeferredAnswerHandlingTest {
         var answered = false
         DeferredCheckCoordinator().check(device.inputs(storage, server)) { answered = true }
 
-        pollUntil("the gate was never saved") { storage.deferredCheckCompleted }
+        pollUntil("the gate was never saved") { synchronized(storage.stateLock) { storage.deferredCheckCompleted } }
 
         assertFalse(answered)
         assertNull(storage.cachedAttribution)
