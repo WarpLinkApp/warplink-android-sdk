@@ -98,7 +98,7 @@ The deferred check runs exactly once per install and caches its outcome:
 
 - On first launch the SDK performs the attribution request.
 - Completion is recorded **only on a definitive server response** (a match or a confirmed no-match).
-- If the first attempt fails (for example, the device is offline), completion is **not** recorded, so the check retries on the next launch instead of returning a stale "no match".
+- If the first attempt fails (for example, the device is offline), completion is **not** recorded, so the check tries again on a later launch instead of returning a stale "no match". The SDK waits 15 minutes after the first failure, then 1 hour, 6 hours and 1 day, and stops 3 days after the first failure.
 - Once complete, subsequent calls return the cached result with no network request.
 
 The completion marker is stored in the app's no-backup files directory, so an Android Auto Backup restore on reinstall does not carry it over. A genuine reinstall is treated as a fresh first launch and re-runs attribution.
@@ -117,7 +117,7 @@ In these cases the SDK transparently falls back to probabilistic matching (proba
 
 ### Offline First Launch
 
-If there is no connectivity on first launch, the check fails with `WarpLinkError.NetworkError`. Because completion is consumed only on a definitive server response, the check automatically retries on the next launch once connectivity returns. The offline attempt is not lost.
+If there is no connectivity on first launch, the check fails with `WarpLinkError.NetworkError`. Because completion is consumed only on a definitive server response, the check tries again on a later launch once the wait is over and connectivity returns. The offline attempt is not lost.
 
 ### Reinstall Durability
 
@@ -128,6 +128,30 @@ The first-launch marker is kept out of Android Auto Backup (stored via `noBackup
 A match key is a network rather than a device, so several clicks can land under one key: your own user clicking twice, or two strangers behind the same NAT. The platform keeps them as a list, newest first, up to 10 per match key. A second click no longer overwrites the first, so the install that belongs to the earlier click can still find it.
 
 The server matches against the newest entry your app is allowed to claim, and removes only that entry once it becomes an install. When more than one entry was claimable, the match is scored lower to reflect that the answer was picked from a set.
+
+## If your test did not match
+
+Use a `wl_test_` key and a link from your Test app while you build: a Test key has no waits and no age limits. Tap the link again before every install: one tap matches one install.
+
+If a test still shows no link, read the status of the check:
+
+```kotlin
+import android.util.Log
+
+Log.d("WarpLinkTest", WarpLink.deferredCheckStatus.toString())
+```
+
+Read it after the check ends, for example from a debug button, or watch for the `Deferred check: <state>` log line. Right after `configure`, it reads the check as still running.
+
+From Java, call `WarpLink.INSTANCE.getDeferredCheckStatus()`. `Waiting(retryAtMillis)`, `SkippedOldInstall` and `Stopped` mean the SDK did not send a request. `NoMatch` means the server looked and found no link. All of them give the same empty answer from `checkDeferredDeepLink`, and `isAttributionComplete()` stays `false` after a check that did not send. These causes give no link:
+
+- **The link and the key are from different environments.** A `wl_test_` key matches only taps on links of your Test app, at `<handle>-test.aplnk.to`. A `wl_live_` key matches only Production links. Create the test link in Test, and tap that link.
+- **A wait is running.** The first launch never waits. A check counts as failed from the moment its request starts, so stopping the app in Android Studio while the request is out starts a 15-minute wait. Use a `wl_test_` key, or wait until `retryAtMillis`.
+- **The install is too old.** With a `wl_live_` key, an install older than 48 hours is checked without language and timezone, so it usually reads `NoMatch`. An install older than 30 days is not checked and reads `SkippedOldInstall`. Android counts the age from the first install. A Run from Android Studio and `adb install -r` keep that time. Uninstall the app to start the age and the waits over.
+- **The click was used.** A click matches one install. Tap the link again before the next install.
+- **The click is too old.** The match window is 6 hours by default.
+
+With `debugLogging = true`, each check prints `Deferred check request: attempt <n>, raw signals <yes|no>` to Logcat under the `WarpLink` tag, and each check ends with `Deferred check: <state>`. A waiting check prints `Deferred check: waiting, retry at <ISO 8601 time>`.
 
 ## Related Guides
 

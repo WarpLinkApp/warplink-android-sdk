@@ -14,7 +14,8 @@ import app.warplink.WarpLinkOptions
  * clients one operation uses never come from two different `configure` calls.
  */
 internal class SdkSession(
-    val options: WarpLinkOptions,
+    val apiKey: String,
+    options: WarpLinkOptions,
     val logger: Logger,
     val storage: Storage,
     val apiClient: ApiClient,
@@ -23,9 +24,33 @@ internal class SdkSession(
     val autoHandler: AutoLinkHandler?,
 ) {
 
+    /** The options of the live `configure` call. Only `onLink` ever changes, see [adoptSink]. */
+    @Volatile
+    var options: WarpLinkOptions = options
+        private set
+
     fun deferredCheckInputs(settings: RetrySettings) = DeferredCheckInputs(
         storage, fingerprintCollector, apiClient, installReferrerReader, logger, settings
     )
+
+    /**
+     * Whether a `configure` with [key] and [other] would build this very session again.
+     *
+     * `onLink` is left out of the comparison: a lambda that captures an activity is
+     * a new instance on every call, so comparing it would never find two calls equal.
+     * Both calls must still agree on whether a sink is set at all, because that
+     * decides whether the session has a handler.
+     */
+    fun isConfiguredWith(key: String, other: WarpLinkOptions): Boolean =
+        apiKey == key &&
+            (options.onLink == null) == (other.onLink == null) &&
+            options.copy(onLink = null) == other.copy(onLink = null)
+
+    /** Sends every later result to the `onLink` of [other], an equal call, and keeps the rest of the session. */
+    fun adoptSink(other: WarpLinkOptions) {
+        options = other
+        other.onLink?.let { autoHandler?.replaceSink(it) }
+    }
 
     companion object {
 
@@ -38,6 +63,7 @@ internal class SdkSession(
         ): SdkSession {
             val logger = Logger(options.debugLogging)
             return SdkSession(
+                apiKey = apiKey,
                 options = options,
                 logger = logger,
                 storage = Storage(context, KeyEnvironment.of(apiKey)),

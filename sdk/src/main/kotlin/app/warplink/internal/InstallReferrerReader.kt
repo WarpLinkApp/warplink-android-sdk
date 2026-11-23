@@ -115,15 +115,17 @@ internal class InstallReferrerReader(
         }
         return try {
             val details = client.installReferrer
-            val parsed = parseWarpLinkReferrer(details.installReferrer)
+            val raw = details.installReferrer
+            val parsed = parseWarpLinkReferrer(raw)
             // A referrer that is present but not ours is the ordinary organic
             // case, so it is reported as normal rather than as degraded.
             logger?.log(describe(parsed))
-            parsed?.let {
+            raw.takeIf { it.isNotBlank() }?.let {
                 ReferrerRead(
-                    it.linkId,
+                    parsed?.linkId,
                     details.installBeginTimestampSeconds,
-                    it.recoveryToken
+                    parsed?.recoveryToken,
+                    rawReferrer = it
                 )
             }
         } catch (e: Exception) {

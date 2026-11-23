@@ -59,7 +59,7 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    compileOnly("androidx.annotation:annotation:1.9.1")
+    compileOnly("androidx.annotation:annotation:1.11.0")
     implementation("com.android.installreferrer:installreferrer:2.2")
 
     testImplementation("junit:junit:4.13.2")

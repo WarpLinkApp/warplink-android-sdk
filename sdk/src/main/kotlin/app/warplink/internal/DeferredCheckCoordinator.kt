@@ -10,6 +10,8 @@ internal class DeferredCheckInputs(
     val installReferrerReader: InstallReferrerReader,
     val logger: Logger?,
     val settings: RetrySettings,
+    /** Wall-clock milliseconds, for the traffic rules. Overridden only by tests. */
+    val clock: () -> Long = System::currentTimeMillis,
 )
 
 /**
@@ -27,7 +29,11 @@ internal class DeferredCheckInputs(
  * callbacks, and applies nothing to storage (see `performDeferredCheck`'s
  * `isCurrentCheck`).
  *
- * Its own lock guards the three fields. It is taken inside `storage.stateLock`
+ * Before it sends anything it applies the traffic rules (see [decideTraffic]).
+ * A check they hold back answers success(null) at once and sends nothing, and
+ * leaves the completion gate open. Every check logs its outcome once.
+ *
+ * Its own lock guards the four fields. It is taken inside `storage.stateLock`
  * (see [Storage.stateLock]), never the other way round, and never held across a
  * callback.
  */
@@ -36,12 +42,16 @@ internal class DeferredCheckCoordinator {
     private val lock = Any()
     private var inFlight = false
     private var generation = 0
+    private var currentRun: AttemptRun? = null
     private val parked = mutableListOf<(Result<WarpLinkDeepLink?>) -> Unit>()
+
+    /** Whether a check is on the wire. */
+    val isRunning: Boolean get() = synchronized(lock) { inFlight }
 
     fun check(inputs: DeferredCheckInputs, callback: (Result<WarpLinkDeepLink?>) -> Unit) {
         val storage = inputs.storage
         if (storage.deferredCheckCompleted) {
-            inputs.logger?.log("Deferred check already completed, returning cached")
+            logOutcome(inputs)
             callback(Result.success(storage.cachedAttribution))
             return
         }
@@ -50,6 +60,20 @@ internal class DeferredCheckCoordinator {
             inputs.logger?.log("Deferred check already in flight, awaiting its result")
             return
         }
+        val complete = { result: Result<WarpLinkDeepLink?> ->
+            val waiting = finish(started)
+            if (waiting != null) logOutcome(inputs)
+            callback(result)
+            waiting.orEmpty().forEach { it(result) }
+        }
+        val decision = storage.traffic.decide(inputs.clock())
+        if (decision !is TrafficDecision.Proceed) {
+            if (decision == TrafficDecision.SkipInstallAge) storage.traffic.noteSkippedForAge()
+            complete(Result.success(null))
+            return
+        }
+        val run = AttemptRun(storage.traffic, inputs.clock, inputs.logger, decision.sendRawSignals)
+        synchronized(lock) { if (started == generation) currentRun = run }
         performDeferredCheck(
             storage,
             inputs.fingerprintCollector,
@@ -57,12 +81,18 @@ internal class DeferredCheckCoordinator {
             inputs.installReferrerReader,
             inputs.logger,
             isCurrentCheck = { isCurrent(started) },
-            settings = inputs.settings
-        ) { result ->
-            val waiting = finish(started)
-            callback(result)
-            waiting.forEach { it(result) }
-        }
+            settings = inputs.settings,
+            sendRawSignals = decision.sendRawSignals,
+            attempt = run,
+            callback = complete
+        )
+    }
+
+    /** One line per check: where it left the install, which also says why a held back check sent nothing. */
+    private fun logOutcome(inputs: DeferredCheckInputs) {
+        val logger = inputs.logger ?: return
+        val status = deferredCheckStatusOf(inputs.storage, isRunning, inputs.clock())
+        logger.log("Deferred check: ${describeStatus(status)}")
     }
 
     /**
@@ -130,19 +160,23 @@ internal class DeferredCheckCoordinator {
     private fun isCurrent(started: Int): Boolean = synchronized(lock) { started == generation }
 
     /**
-     * The callers parked on check [started]. Empty when it was abandoned: its
+     * The callers parked on check [started], or null when it was abandoned: its
      * parked callers were answered then, and touching the shared state now would
-     * release the replacement check and steal its callbacks.
+     * release the replacement check and steal its callbacks. An abandoned check
+     * also logs no outcome, since its storage and logger are no longer the SDK's.
      */
-    private fun finish(started: Int): List<(Result<WarpLinkDeepLink?>) -> Unit> = synchronized(lock) {
-        if (started != generation) return@synchronized emptyList()
+    private fun finish(started: Int): List<(Result<WarpLinkDeepLink?>) -> Unit>? = synchronized(lock) {
+        if (started != generation) return@synchronized null
         inFlight = false
+        currentRun = null
         drain()
     }
 
     private fun release(): List<(Result<WarpLinkDeepLink?>) -> Unit> = synchronized(lock) {
         generation++
         inFlight = false
+        currentRun?.abandon()
+        currentRun = null
         drain()
     }
 

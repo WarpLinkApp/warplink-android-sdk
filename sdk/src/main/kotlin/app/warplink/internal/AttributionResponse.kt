@@ -13,5 +13,9 @@ internal data class AttributionResponse(
     val customParams: Map<String, Any>?,
     val installId: String?,
     /** The 1.2.0 evidence fields, absent from an older server's answer. */
-    val evidence: ReferralEvidenceFields = ReferralEvidenceFields()
+    val evidence: ReferralEvidenceFields = ReferralEvidenceFields(),
+    /** Present only when the request carried a Tether code. */
+    val tether: TetherResponse? = null,
+    /** The traffic policy the server sent, null from an older server. */
+    val policy: SdkPolicy? = null
 )

@@ -18,7 +18,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("app.warplink:sdk:1.3.0")
+    implementation("app.warplink:sdk:1.4.0")
 }
 ```
 
@@ -26,7 +26,7 @@ dependencies {
 
 ### 1. Configure once, receive links in one place
 
-In your `Application.onCreate()`, call `configure` with an `onLink` callback. That callback receives cold-start, warm-start, and deferred matches. Nothing else is required. A background deferred check that cannot finish, for example on a launch with no network, retries by itself on the next launch.
+In your `Application.onCreate()`, call `configure` with an `onLink` callback. That callback receives cold-start, warm-start, and deferred matches. Nothing else is required. A background deferred check that cannot finish, for example on a launch with no network, retries by itself on a later launch, after a wait that grows with each failure.
 
 ```kotlin
 import android.app.Application
@@ -91,7 +91,11 @@ That's the whole integration. Deep links, deferred deep links, and attribution n
 
 ## Testing a first install
 
-A `wl_test_` key keeps its attribution state apart from `wl_live_` state on the same device. Use a Test key in debug builds. To test a first install again without uninstalling the app, call `WarpLink.clearAttribution()` with a Test key. It clears the attribution stored on the device and starts a new check. It does nothing with a live key.
+A `wl_test_` key keeps its attribution state apart from `wl_live_` state on the same device, and it has no waits and no age limits. Use a Test key in debug builds. A Test key needs a Test app with its own package name, so give the debug build that package name, and add the Test app's host `<handle>-test.aplnk.to` to its App Links intent filter. To test a first install again without uninstalling the app, call `WarpLink.clearAttribution()` with a Test key. It clears the attribution stored on the device and starts a new check. It does nothing with a live key.
+
+If a test shows no link, read `WarpLink.deferredCheckStatus` (from Java, `WarpLink.INSTANCE.getDeferredCheckStatus()`). It tells a check that did not send (a wait, an install that is too old, or a check the SDK gave up on) from a check that found no link, and it sends no request. See [If your test did not match](docs/deferred-deep-links.md#if-your-test-did-not-match).
+
+Calling `configure` again with the same key and options does nothing, and the running check keeps running. Only a new `onLink` takes effect.
 
 ## Disabling any piece
 

@@ -95,6 +95,37 @@ SPECS=(
 # same URI. Identifying a claim by its URI let the overtaken tap drop the newer
 # tap's claim, which let a duplicate through and billed a second click.
 "WL-S27|internal/AutoLinkHandler.kt|app.warplink.RetapPhantomClickTest|            if (token == claimToken) {|            if (key == lastUri) {"
+# The 1.4.0 traffic rules (WL-S63 to WL-S75). Each edit switches one rule off.
+"WL-S63|internal/TrafficDecision.kt|app.warplink.internal.DeferredAgeRulesTest|    if (installAgeSeconds > policy.maxInstallAgeSeconds) return TrafficDecision.SkipInstallAge|    // defect reintroduced: no age skip"
+"WL-S64|internal/TrafficDecision.kt|app.warplink.internal.DeferredAgeRulesTest|sendRawSignals = installAgeSeconds <= policy.rawSignalMaxInstallAgeSeconds|sendRawSignals = true"
+"WL-S64|internal/DeferredDeepLink.kt|app.warplink.internal.DeferredAgeRulesTest|    if (!run.sendRawSignals) {|    if (false) {"
+"WL-S64|internal/DeferredDeepLink.kt|app.warplink.internal.DeferredAgeRulesTest|    if (read.linkId == null) {|    if (false) {"
+"WL-S65|internal/TrafficDecision.kt|app.warplink.internal.DeferredBackoffTest|        if (sinceLastMs in 0 until waitMs) {|        if (false) {"
+"WL-S66|internal/TrafficDecision.kt|app.warplink.internal.DeferredBackoffTest|        if (nowMs - failures.firstAtMs >= policy.giveUpAfterSeconds * 1_000) return TrafficDecision.GaveUp|        // defect reintroduced: never gives up"
+"WL-S67|internal/Storage.kt|app.warplink.internal.DeferredBackoffTest|        traffic.recordSuccess()|        // defect reintroduced: a 200 answer keeps the failures"
+"WL-S68|internal/AttributionMatch.kt|app.warplink.internal.DeferredAnswerHandlingTest|        deliver = { result -> if (attempt != null) deliver(result) else onMainThread { deliver(result) } },|        deliver = { result -> onMainThread { deliver(result) } },"
+"WL-S69|internal/AttributionMatch.kt|app.warplink.internal.DeferredAnswerHandlingTest|                        result.getOrNull()?.policy?.let { traffic.policy = it }|                        // defect reintroduced: the policy is never stored"
+"WL-S70|internal/WarpLinkRuntime.kt|app.warplink.ConfigureIdempotentTest|            session?.takeIf { it.isConfiguredWith(apiKey, options) }?.let {|            session?.takeIf { false }?.let {"
+"WL-S70|internal/SdkSession.kt|app.warplink.ConfigureIdempotentTest|            options.copy(onLink = null) == other.copy(onLink = null)|            options == other"
+"WL-S71|internal/DeferredCheckLauncher.kt|app.warplink.ForegroundWaitTest|            else -> foreground.whenVisible { run(callback) }|            else -> run(callback)"
+"WL-S71|internal/ForegroundGate.kt|app.warplink.internal.ForegroundGateTest|        state.importanceReasonCode == ActivityManager.RunningAppProcessInfo.REASON_UNKNOWN|        true"
+"WL-S71|internal/ForegroundGate.kt|app.warplink.internal.ForegroundGateTest|        if (started.isEmpty()) seeded = false
+|        // defect reintroduced: the seed outlives the last stop
+"
+"WL-S71|internal/ForegroundGate.kt|app.warplink.internal.ForegroundGateDialogTest|        override fun onActivityResumed(activity: Activity) = activityOnScreen(activity)|        override fun onActivityResumed(activity: Activity) = Unit"
+"WL-S72|internal/AttributionMatch.kt|app.warplink.internal.DeferredRequestFieldsTest|                    attemptNumber = attempt?.number,|                    attemptNumber = null,"
+"WL-S73|internal/DeferredDeepLink.kt|app.warplink.internal.DeferredRequestFieldsTest|            collectAndMatch(run, read?.rawReferrer)|            collectAndMatch(run)"
+"WL-S73|internal/DeferredDeepLink.kt|app.warplink.internal.DeferredRequestFieldsTest|        referrer = read.linkId,|        referrer = read.linkId, installReferrer = read.rawReferrer,"
+"WL-S74|internal/DeferredCheckStatusReader.kt|app.warplink.internal.DeferredCheckStatusTest|        decision == TrafficDecision.GaveUp -> DeferredCheckStatus.Stopped|        false -> DeferredCheckStatus.Stopped"
+"WL-S74|internal/DeferredCheckStatusReader.kt|app.warplink.internal.DeferredCheckStatusTest|        decision == TrafficDecision.SkipInstallAge -> DeferredCheckStatus.SkippedOldInstall|        false -> DeferredCheckStatus.SkippedOldInstall"
+"WL-S74|internal/DeferredCheckStatusReader.kt|app.warplink.internal.DeferredCheckStatusTest|        checkRunning -> DeferredCheckStatus.Checking|        false -> DeferredCheckStatus.Checking"
+"WL-S75|internal/AttributionMatch.kt|app.warplink.internal.DeferredCheckLogTest|            attempt?.logRequest()|            // defect reintroduced: no request line"
+"WL-S75|internal/AttributionMatch.kt|app.warplink.internal.DeferredCheckLogTest|        onFailedTry = { error, number, willRetry -> attempt?.logFailedTry(error, number, willRetry, settings) },|        // defect reintroduced: a failed request is silent"
+"WL-S75|internal/BoundedRetry.kt|app.warplink.internal.BoundedRetryDriverTest|onFailedTry(it, number, wait != null)|onFailedTry(it, number, true)"
+"WL-S75|internal/DeferredCheckCoordinator.kt|app.warplink.internal.DeferredCheckLogTest|            if (waiting != null) logOutcome(inputs)|            // defect reintroduced: no outcome line"
+"WL-S75|internal/DeferredCheckCoordinator.kt|app.warplink.internal.DeferredCheckOutcomeLogTest|            if (waiting != null) logOutcome(inputs)|            logOutcome(inputs)"
+"WL-S75|internal/DeferredCheckCoordinator.kt|app.warplink.internal.DeferredCheckOutcomeLogTest|inputs.logger, decision.sendRawSignals)|inputs.logger, false)"
+"WL-S75|internal/DeferredCheckStatusReader.kt|app.warplink.internal.DeferredCheckOutcomeLogTest|.truncatedTo(ChronoUnit.SECONDS)|"
 )
 
 WANTED=("$@")

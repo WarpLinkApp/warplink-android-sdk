@@ -28,7 +28,7 @@ internal class AutoLinkHandler(
     private val application: Application?,
     private val logger: Logger?,
     private val isWarpLinkUri: (Uri) -> Boolean,
-    private val onLink: (Result<WarpLinkDeepLink>) -> Unit,
+    onLink: (Result<WarpLinkDeepLink>) -> Unit,
     private val resolve: (Uri, (Result<WarpLinkDeepLink>) -> Unit) -> Unit,
     /**
      * Monotonic millisecond source for the dedupe window. Deliberately NOT
@@ -46,23 +46,11 @@ internal class AutoLinkHandler(
 ) {
 
     private val lock = Any()
-    private var lastUri: String? = null
-    private var lastAt: Long = 0L
-    private var lastResult: Result<WarpLinkDeepLink>? = null
+    private val claims = LinkClaims(now)
 
-    /**
-     * Bumped by every claim, and captured by the dispatch that took it.
-     *
-     * The URI alone cannot identify a claim. A re-tap of the SAME link past the
-     * dedupe window takes a FRESH claim under the same URI, so the older tap
-     * read `key == lastUri` as its own, dropped the newer tap's claim on its
-     * way out, and let the newer tap's duplicate through. That duplicate
-     * resolved again under a new tap id, which billed a second click for one
-     * tap. A counter tells the two claims apart; a string cannot.
-     */
-    private var claimToken = 0L
-    private val waiting =
-        mutableMapOf<String, MutableList<(Result<WarpLinkDeepLink>) -> Unit>>()
+    /** The host's sink. A same-options `configure` swaps it for the new call's lambda. */
+    @Volatile
+    private var sink = onLink
     private var callbacks: Application.ActivityLifecycleCallbacks? = null
 
     /**
@@ -111,10 +99,15 @@ internal class AutoLinkHandler(
         }
     }
 
-    /** Resolve [uri] and route the result to [onLink], deduped. */
+    /** Routes every later result to [onLink]. A result already being resolved goes to it too. */
+    fun replaceSink(onLink: (Result<WarpLinkDeepLink>) -> Unit) {
+        sink = onLink
+    }
+
+    /** Resolve [uri] and route the result to the sink, deduped. */
     fun dispatch(uri: Uri) {
         if (!isWarpLinkUri(uri)) return
-        val token = synchronized(lock) { claimLocked(uri) }
+        val token = claims.claim(uri)
         if (token == null) {
             logger?.log("Duplicate deep link suppressed: $uri")
             return
@@ -125,8 +118,8 @@ internal class AutoLinkHandler(
             // The token, not the URI. A re-tap of the same link is a newer
             // claim wearing the same string, so a URI comparison called it
             // current and handed the host the overtaken tap's answer.
-            val superseded = synchronized(lock) { token != claimToken }
-            settle(uri, token, result)
+            val superseded = claims.isSuperseded(token)
+            claims.settle(uri, token, result)
             if (superseded) {
                 // A newer tap claimed the handler while this one was retrying.
                 // One tap means one navigation, so the older one stays silent.
@@ -134,7 +127,7 @@ internal class AutoLinkHandler(
                 logger?.log("Superseded by a newer link; not dispatching: $uri")
                 return@resolve
             }
-            onLink(result)
+            sink(result)
         }
     }
 
@@ -145,18 +138,10 @@ internal class AutoLinkHandler(
      * triggering a second resolve. Either way the caller gets one answer.
      */
     fun dispatchManual(uri: Uri, callback: (Result<WarpLinkDeepLink>) -> Unit) {
-        var settled: Result<WarpLinkDeepLink>? = null
-        val token = synchronized(lock) {
-            claimLocked(uri).also { claimed ->
-                if (claimed == null) {
-                    settled = lastResult
-                    if (settled == null) waitersFor(uri).add(callback)
-                }
-            }
-        }
+        val (token, settled) = claims.claimOrPark(uri, callback)
         if (token != null) {
             resolve(uri) { result ->
-                settle(uri, token, result)
+                claims.settle(uri, token, result)
                 callback(result)
             }
             return
@@ -165,12 +150,12 @@ internal class AutoLinkHandler(
         settled?.let { callback(it) }
     }
 
-    /** Route a deferred result to [onLink]; a no-match (null) is not dispatched. */
+    /** Route a deferred result to the sink; a no-match (null) is not dispatched. */
     fun dispatchDeferred(result: Result<WarpLinkDeepLink?>) {
         result.onSuccess { deepLink ->
-            if (deepLink != null) onLink(Result.success(deepLink))
+            if (deepLink != null) sink(Result.success(deepLink))
         }
-        result.onFailure { error -> onLink(Result.failure(error)) }
+        result.onFailure { error -> sink(Result.failure(error)) }
     }
 
     fun unregister() {
@@ -181,59 +166,6 @@ internal class AutoLinkHandler(
             callbacks = null
         }
     }
-
-    /**
-     * Take ownership of dispatching [uri], and hand back the token for the
-     * claim just taken. Null when the same URI was already claimed inside the
-     * dedupe window (auto plus a manual `handleDeepLink` for one link), meaning
-     * it must not be resolved a second time. Call under [lock].
-     */
-    private fun claimLocked(uri: Uri): Long? {
-        val key = uri.toString()
-        val at = now()
-        // The range, rather than a bare `<`, states the invariant the clock
-        // gives us. Anything outside it is a fresh tap, so a source that ever
-        // did run backwards would dispatch rather than silently swallow.
-        if (key == lastUri && (at - lastAt) in 0 until DEDUP_WINDOW_MS) {
-            return null
-        }
-        lastUri = key
-        lastAt = at
-        lastResult = null
-        claimToken += 1
-        return claimToken
-    }
-
-    /** Publish a dispatch's result to any caller parked on the same URI. */
-    private fun settle(uri: Uri, token: Long, result: Result<WarpLinkDeepLink>) {
-        val key = uri.toString()
-        val parked = synchronized(lock) {
-            // A newer claim may have been taken meanwhile, for this URI or for
-            // another; only the current claim's own result may touch the claim.
-            if (token == claimToken) {
-                if (result.isSuccess) {
-                    lastResult = result
-                } else {
-                    // A failed resolve (offline, server error) is not a
-                    // duplicate to suppress: drop the claim so a host retrying
-                    // the same link really re-resolves instead of being handed
-                    // the cached failure back for the rest of the window.
-                    lastUri = null
-                    lastResult = null
-                }
-            }
-            // Drained whatever the token says. A caller parked on this URI is
-            // owed an answer by whichever dispatch settles first, and a claim
-            // taken for a DIFFERENT URI would otherwise leave it parked for the
-            // life of the process.
-            waiting.remove(key).orEmpty()
-        }
-        parked.forEach { it(result) }
-    }
-
-    /** Call under [lock]. */
-    private fun waitersFor(uri: Uri) =
-        waiting.getOrPut(uri.toString()) { mutableListOf() }
 
     private fun activityCallbacks() =
         object : Application.ActivityLifecycleCallbacks {
@@ -254,8 +186,4 @@ internal class AutoLinkHandler(
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         }
-
-    companion object {
-        private const val DEDUP_WINDOW_MS = 1500L
-    }
 }

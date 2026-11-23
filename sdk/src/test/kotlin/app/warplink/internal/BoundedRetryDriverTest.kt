@@ -127,4 +127,49 @@ class BoundedRetryDriverTest {
         assertEquals(1, attempts)
         assertEquals(1, deliveries)
     }
+
+    /** Runs [errors] one per attempt and returns what the driver told [BoundedRetry]'s failure hook. */
+    private fun decisions(
+        errors: List<Throwable>,
+        settings: RetrySettings = RetrySettings.NO_WAIT,
+        elapsedMs: () -> Long = { 0L },
+        isCurrent: () -> Boolean = { true },
+    ): List<Pair<Int, Boolean>> {
+        val told = mutableListOf<Pair<Int, Boolean>>()
+        BoundedRetry(
+            InlineScheduler(), settings, elapsedMs, isCurrent,
+            onFailedTry = { _, number, willRetry -> told.add(number to willRetry) },
+        ).run<Unit>(
+            attempt = { number, done -> done(Result.failure(errors[number - 1])) },
+            deliver = { },
+        )
+        return told
+    }
+
+    @Test
+    fun `the failure hook says a try is followed by another only when one runs`() {
+        assertEquals(listOf(1 to true, 2 to true, 3 to false), decisions(List(3) { transient }))
+    }
+
+    @Test
+    fun `a rate limit that gets its one retry is reported as retried`() {
+        val limited = WarpLinkError.ServerError(429, "", retryAfterSeconds = 1.0)
+
+        assertEquals(listOf(1 to true, 2 to false), decisions(listOf(limited, WarpLinkError.LinkNotFound)))
+    }
+
+    @Test
+    fun `a transient failure that finds the budget spent is reported as final`() {
+        val reads = listOf(0L, RetrySettings.DEFAULT.totalBudgetMs + 1).iterator()
+
+        assertEquals(
+            listOf(1 to false),
+            decisions(listOf(transient), RetrySettings.DEFAULT, elapsedMs = { reads.next() }),
+        )
+    }
+
+    @Test
+    fun `a transient failure of a superseded run is reported as final`() {
+        assertEquals(listOf(1 to false), decisions(listOf(transient), isCurrent = { false }))
+    }
 }

@@ -15,8 +15,18 @@ enum class MatchMethod(val wireValue: String) {
     PROBABILISTIC("probabilistic");
 
     companion object {
-        /** The method for [value], or null for one this SDK does not know. */
+        private const val SERVER_REFERRER = "referrer"
+
+        /**
+         * The method for [value], or null for one this SDK does not know. The
+         * server names the install referrer match `referrer`, and rows from
+         * before that name carry `android_referrer`. Both give [ANDROID_REFERRER].
+         */
         fun fromWireValue(value: String?): MatchMethod? =
-            entries.firstOrNull { it.wireValue == value }
+            if (value == SERVER_REFERRER) {
+                ANDROID_REFERRER
+            } else {
+                entries.firstOrNull { it.wireValue == value }
+            }
     }
 }

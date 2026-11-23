@@ -94,7 +94,7 @@ When you call `WarpLink.configure(context, apiKey, options)`:
 
 ### First Launch Detection
 
-The SDK tracks first-launch state with two markers stored in the app's no-backup files directory (`noBackupFilesDir`): **attempted** (a check has started) and **completed** (a definitive server response arrived). The deferred request runs until it completes; completion is consumed only on a definitive response, so an offline first launch retries next launch. Because the markers are excluded from Android Auto Backup, a reinstall is treated as a fresh first launch. If that directory cannot be written, the completion marker falls back to `SharedPreferences`, bound to the install's first-install time so a restore cannot carry it onto a reinstall.
+The SDK tracks first-launch state with two markers stored in the app's no-backup files directory (`noBackupFilesDir`): **attempted** (a check has started) and **completed** (a definitive server response arrived). The deferred request runs until it completes; completion is consumed only on a definitive response, so an offline first launch tries again on a later launch, after a wait that grows from 15 minutes to 1 day, until 3 days have passed since the first failure. Because the markers are excluded from Android Auto Backup, a reinstall is treated as a fresh first launch. If that directory cannot be written, the completion marker falls back to `SharedPreferences`, bound to the install's first-install time so a restore cannot carry it onto a reinstall.
 
 ### Signal Collection
 
@@ -114,7 +114,7 @@ After a definitive deferred check, the result (match or confirmed no-match) is c
 
 - The attribution API is called at most once per successful check per install
 - Subsequent calls to `checkDeferredDeepLink` return instantly from cache
-- A failed (e.g., offline) attempt is not cached, so it retries on the next launch
+- A failed (e.g., offline) attempt is not cached, so it tries again on a later launch, after a wait
 
 ### Threading
 

@@ -107,7 +107,7 @@ internal fun handleAttributionResponse(
         AttributionOutcome.ABANDONED -> logger?.log("Deferred check abandoned, discarding its response")
         AttributionOutcome.NOT_ROUTED -> logNotRouted(logger)
         AttributionOutcome.UNROUTABLE ->
-            logger?.log("Attribution matched with nothing to route to, retrying next launch")
+            logger?.log("Attribution matched with nothing to route to, trying again after the backoff")
         AttributionOutcome.SETTLED ->
             logger?.log(deepLink?.let { "Deferred deep link matched: ${it.linkId}" } ?: "No deferred deep link match")
     }

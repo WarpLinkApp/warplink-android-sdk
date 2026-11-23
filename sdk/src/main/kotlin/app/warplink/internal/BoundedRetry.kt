@@ -47,6 +47,11 @@ internal class BoundedRetry(
      * the host's sink is.
      */
     private val isCurrent: () -> Boolean = { true },
+    /**
+     * Told of every failed attempt with whether another follows, which only
+     * this driver knows: it weighs the error, the attempt count and the budget.
+     */
+    private val onFailedTry: (error: Throwable, number: Int, willRetry: Boolean) -> Unit = { _, _, _ -> },
 ) {
 
     fun <T> run(
@@ -65,6 +70,7 @@ internal class BoundedRetry(
     ) {
         attempt(number) { result ->
             val wait = nextWait(result, number, startedAt, rateLimitSpent)
+            result.exceptionOrNull()?.let { onFailedTry(it, number, wait != null) }
             if (wait == null) {
                 deliver(result)
                 return@attempt

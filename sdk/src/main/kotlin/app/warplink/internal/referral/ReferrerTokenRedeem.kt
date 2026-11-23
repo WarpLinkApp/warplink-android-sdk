@@ -1,6 +1,7 @@
 package app.warplink.internal.referral
 
 import app.warplink.internal.ApiClient
+import app.warplink.internal.AttemptRun
 import app.warplink.internal.AttributionResponse
 import app.warplink.internal.RetrySettings
 import app.warplink.internal.Storage
@@ -21,15 +22,16 @@ internal sealed interface ReferrerTokenOutcome {
 
     /**
      * The token could not be settled now: the server cannot confirm it yet, or
-     * the request failed. The check ends without completing, so the next launch
-     * reads the same referrer and tries again. The token is kept, never
-     * cleared, since nothing refused it.
+     * the request failed. The check ends without completing, so the next check
+     * once its backoff has passed reads the same referrer and tries again. The
+     * token is kept, never cleared, since nothing refused it.
      */
     data class Retry(val error: Throwable) : ReferrerTokenOutcome
 }
 
 /**
  * Redeems the recovery token the Play referrer carried, before any estimate.
+ * A `wl1t_` Tether test code takes its own path, [redeemTetherTestCode].
  *
  * The request carries the token and nothing that could match on its own. The
  * server refuses a bad token only when no referrer or signals travel with it,
@@ -44,8 +46,14 @@ internal fun redeemReferrerToken(
     storage: Storage,
     settings: RetrySettings,
     isCurrentCheck: () -> Boolean,
+    attempt: AttemptRun,
     deliver: (ReferrerTokenOutcome) -> Unit,
 ) {
+    val testCode = token?.let(TetherTestCode::parse)
+    if (testCode != null) {
+        redeemTetherTestCode(testCode, apiClient, storage, settings, isCurrentCheck, attempt, deliver)
+        return
+    }
     val invitation = token?.let(ReferralInvitation::parse)
     if (invitation == null || invitation.isExpired(storage.referral.nowSeconds())) {
         deliver(ReferrerTokenOutcome.FallThrough)
@@ -53,6 +61,7 @@ internal fun redeemReferrerToken(
     }
     matchWithRetry(
         apiClient, MatchSlot.DEFERRED_CHECK, settings, isCurrentCheck,
+        storage.traffic, attempt,
         signals = null,
         referrer = null,
         recoveryToken = invitation.token,

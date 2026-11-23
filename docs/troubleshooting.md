@@ -279,6 +279,8 @@ adb logcat -s WarpLink
 - `"First launch: collecting device signals"`: the deferred check is starting on the probabilistic path (no referrer reader)
 - `"Referrer found: "` followed by the link id: the Play Install Referrer named a WarpLink link
 - `"No WarpLink referrer, falling back to probabilistic matching"`: organic install, or the referrer was unavailable
+- `"Deferred check request: attempt <n>, raw signals <yes|no>"`: one line for each check
+- `"Deferred check: <state>"`: how a check ended, with `waiting, retry at <ISO 8601 time>` while a wait runs. `WarpLink.deferredCheckStatus` gives the same state in code. See [If your test did not match](deferred-deep-links.md#if-your-test-did-not-match).
 - `"Deferred deep link matched: "` followed by the link id: match found
 - `"No deferred deep link match"`: the server looked and found nothing
 - `"Deferred check already completed, returning cached attribution"`: returning the cached result

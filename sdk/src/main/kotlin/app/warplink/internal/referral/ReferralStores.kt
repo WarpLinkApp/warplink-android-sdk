@@ -21,6 +21,13 @@ internal class ReferralStores(
     val evidence = ReferralEvidenceStore(directory, environment)
     val referrerTap = ReferrerTapStore(directory, environment)
 
+    /**
+     * The receipt the server gave the last Tether test code, kept in memory
+     * only so the app can show it. Never written to disk.
+     */
+    @Volatile
+    var tetherTestReceipt: String? = null
+
     /** Seconds since the epoch. Replaced only by tests. */
     @Volatile
     var nowSeconds: () -> Long = { System.currentTimeMillis() / 1000 }
@@ -58,6 +65,7 @@ internal class ReferralStores(
      */
     fun clearRecords(): Boolean {
         orphanRedeems()
+        tetherTestReceipt = null
         return listOf(pending.clear(), evidence.clear(), referrerTap.clear()).all { it }
     }
 

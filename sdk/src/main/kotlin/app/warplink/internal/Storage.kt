@@ -43,6 +43,9 @@ internal class Storage(
     // answer for the life of this instance (see InstallProvenance).
     private val firstInstallTime: Long = readFirstInstallTime(context)
 
+    /** What limits the deferred check's own traffic: the server's policy, the installation id and the attempts. */
+    val traffic = DeferredTraffic(context.noBackupFilesDir, environment, prefs, firstInstallTime)
+
     init {
         // A cached match with an open gate is a ghost. The two are written
         // together on a definitive response, and only Auto Backup can bring the
@@ -58,8 +61,8 @@ internal class Storage(
     /**
      * Whether the deferred deep link check has reached a definitive server
      * response (a match or a confirmed no-match). Consumed ONLY on that
-     * response, so an offline first launch retries on the next launch instead
-     * of silently swallowing the flag.
+     * response, so an offline first launch tries again once its backoff has
+     * passed instead of silently swallowing the flag.
      */
     var deferredCheckCompleted: Boolean
         // 1.0.x wrote `is_first_launch = false` at the START of its check, before
@@ -113,28 +116,14 @@ internal class Storage(
     val isReinstall: Boolean
         get() = deviceHasCompletedAttribution && !deferredCheckCompleted
 
-    var apiKeyValidatedAt: Long?
-        get() {
-            val value = prefs.getLong(StorageKeys.API_KEY_VALIDATED_AT, -1L)
-            return if (value == -1L) null else value
-        }
-        set(value) {
-            val edit = prefs.edit()
-            if (value != null) edit.putLong(StorageKeys.API_KEY_VALIDATED_AT, value) else edit.remove(StorageKeys.API_KEY_VALIDATED_AT)
-            edit.apply()
-        }
+    private val validation = ValidationStore(prefs)
 
-    val isApiKeyValidationCacheValid: Boolean
-        get() {
-            val validatedAt = apiKeyValidatedAt ?: return false
-            val elapsed = System.currentTimeMillis() - validatedAt
-            return elapsed < VALIDATION_CACHE_DURATION_MS
-        }
+    var apiKeyValidatedAt: Long? by validation::validatedAt
+
+    val isApiKeyValidationCacheValid: Boolean by validation::isCacheValid
 
     /** Custom link domains returned by `/sdk/validate`, cached for offline launches. */
-    var cachedDomains: List<String>
-        get() = readDomains(prefs)
-        set(value) = writeDomains(prefs, value)
+    var cachedDomains: List<String> by validation::domains
 
     var cachedAttribution: WarpLinkDeepLink?
         get() = readCachedAttribution(prefs)
@@ -151,6 +140,7 @@ internal class Storage(
         prefs.edit().clear().apply()
         markers.clear(completedMarker, attemptedMarker)
         referral.clear()
+        traffic.clear()
     }
 
     /**
@@ -170,7 +160,8 @@ internal class Storage(
             .commit()
         val markersCleared = markers.clear(completedMarker, attemptedMarker)
         val referralCleared = referral.clearRecords()
-        prefsCleared && markersCleared && referralCleared
+        val trafficCleared = traffic.resetAttempts()
+        prefsCleared && markersCleared && referralCleared && trafficCleared
     }
 
     /**
@@ -185,6 +176,7 @@ internal class Storage(
             prefs.edit().putLong(StorageKeys.GATE_FALLBACK_INSTALL_TIME, firstInstallTime).apply()
         }
         prefs.edit().putBoolean(StorageKeys.DEVICE_SEEN_ATTRIBUTION, true).apply()
+        traffic.recordSuccess()
     }
 
     private fun clearGate() {
@@ -194,6 +186,5 @@ internal class Storage(
 
     private companion object {
         const val NO_FALLBACK = -1L
-        const val VALIDATION_CACHE_DURATION_MS = 24 * 60 * 60 * 1000L
     }
 }

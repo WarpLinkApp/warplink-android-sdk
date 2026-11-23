@@ -25,7 +25,7 @@ internal fun performServerValidation(
     apiClient.validateApiKey { result ->
         result.onSuccess { response ->
             if (response.valid) {
-                ifCurrent { applyValidation(storage, response.domains, logger) }
+                ifCurrent { applyValidation(storage, response, logger) }
             } else {
                 logger?.warn(
                     "WarpLink API key was rejected by the server; deep links " +
@@ -41,12 +41,14 @@ internal fun performServerValidation(
     }
 }
 
-private fun applyValidation(storage: Storage, domains: List<String>, logger: Logger?) {
+private fun applyValidation(storage: Storage, response: ValidateResponse, logger: Logger?) {
     storage.apiKeyValidatedAt = System.currentTimeMillis()
+    val domains = response.domains
     if (domains.isNotEmpty()) {
         UriParser.setServerDomains(domains)
         storage.cachedDomains = domains
         logger?.log("Link domains loaded: $domains")
     }
+    response.policy?.let { storage.traffic.policy = it }
     logger?.log("API key validated successfully")
 }

@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-22
+
+### Added
+
+- **`WarpLink.readTether()`.** The same call the iOS, React Native and Flutter
+  SDKs offer, so one code path serves every platform. Android never reads the
+  clipboard: the call succeeds with `TetherReadResult.NoClipboard` once
+  `configure` has run, and fails with `WarpLinkError.NotConfigured` before.
+- **Tether test codes.** A `wl1t_` test code in the Play install referrer is
+  sent to the server on its own. The server records nothing for it, and the SDK
+  keeps the receipt in memory in `WarpLink.lastTetherTestReceipt`. The receipt
+  clears with `clearAttribution()` and on restart. A test code never holds up
+  the install referrer link id or the device signals behind it.
+- **`WarpLink.deferredCheckStatus`.** A read-only status that tells a check the
+  SDK skipped from a check that found no match. It is one of `NotChecked`,
+  `Checking`, `Matched`, `NoMatch`, `Waiting(retryAtMillis)`,
+  `SkippedOldInstall` or `Stopped`. It sends no request, and it comes from
+  state stored on the device, so a relaunch keeps it. A `wl_test_` key never
+  reports `Waiting`, `SkippedOldInstall` or `Stopped`. From Java, call
+  `WarpLink.INSTANCE.getDeferredCheckStatus()`.
+
+### Changed
+
+- **Far fewer repeat attribution requests.** The first-launch check is still
+  automatic and still sends one request when it succeeds. When it does not
+  succeed, it now asks less often.
+  - An install older than 30 days sends no request and answers no match. The
+    SDK keeps this separate from the completed flag, so a later reinstall is
+    still detected.
+  - An install older than 48 hours sends no raw device signals. A check that
+    has a link id or a recovery token still sends it. A check with nothing
+    else to send sends nothing and answers no match.
+  - After a check fails, the next one waits 15 minutes, then 1 hour, 6 hours
+    and 1 day. The SDK stops for good 3 days after the first failure. A call
+    made during a wait answers `success(null)` and sends nothing.
+  - The SDK saves the result as soon as the server answers, before it hands the
+    result to the main thread, so an app that is killed at that moment does not
+    ask again.
+  - `configure` with the same key and the same options does nothing, and the
+    check that is running keeps running. The `onLink` function is not part of
+    that comparison: a new one replaces the old one and receives the results.
+    A different key or different options still rebuilds the SDK.
+  - The check, automatic or manual, starts only while one of your activities is
+    on screen. A call made earlier waits and then runs. It never fails because
+    of the wait.
+  - The server can change the waits and the age limits. The SDK keeps its own
+    values as defaults and limits every value the server sends. An older server
+    changes nothing.
+  - A `wl_test_` key skips the age limits and the waits, so you can test a first
+    launch as often as you like.
+- With `debugLogging` on, each deferred check logs its attempt number and
+  whether it carries raw device signals once, says what a failed request ran
+  into (for example `timed out after 3 s (try 1 of 3)`), and logs its outcome
+  once as `Deferred check: <state>`.
+- An activity that was on screen before `configure` stays counted as on screen
+  while a dialog activity opens over it and closes again, so a waiting check
+  runs when it should.
+- Every attribution request now carries `installation_id`, a random id made
+  once per install and removed with the app. The check also sends
+  `attempt_number`, which counts the launches that sent a request.
+
 ## [1.3.0] - 2026-11-02
 
 ### Added

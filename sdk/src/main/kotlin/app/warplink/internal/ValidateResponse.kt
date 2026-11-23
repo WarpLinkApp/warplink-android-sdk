@@ -8,8 +8,10 @@ package app.warplink.internal
  *   server-side). The SDK treats a URL whose host is in this set as a WarpLink
  *   link, so custom domains resolve without a hardcoded allowlist. Empty when
  *   the server response predates the domains field.
+ * @property policy The traffic policy the server sent, null from an older server.
  */
 internal data class ValidateResponse(
     val valid: Boolean,
-    val domains: List<String>
+    val domains: List<String>,
+    val policy: SdkPolicy? = null
 )

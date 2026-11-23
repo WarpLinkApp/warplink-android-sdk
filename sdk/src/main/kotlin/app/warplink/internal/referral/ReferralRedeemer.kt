@@ -83,6 +83,7 @@ internal object ReferralRedeemer {
         }
         matchWithRetry(
             context.apiClient, MatchSlot.REDEEM, context.settings, { true },
+            context.storage.traffic, attempt = null,
             signals = null,
             referrer = null,
             recoveryToken = record.token,

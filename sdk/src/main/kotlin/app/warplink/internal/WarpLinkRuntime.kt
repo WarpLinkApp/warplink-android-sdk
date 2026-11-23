@@ -1,7 +1,9 @@
 package app.warplink.internal
 
+import android.app.Application
 import android.content.Context
 import android.net.Uri
+import app.warplink.DeferredCheckStatus
 import app.warplink.WarpLinkDeepLink
 import app.warplink.WarpLinkError
 import app.warplink.WarpLinkOptions
@@ -19,6 +21,7 @@ internal class WarpLinkRuntime {
     private val lock = Any()
     private var session: SdkSession? = null
     private val deferredChecks = DeferredCheckCoordinator()
+    private val launcher = DeferredCheckLauncher(deferredChecks, { synchronized(lock) { session } }, { settings })
 
     /** Retry settings for the funnels this runtime drives, overridden only by tests. */
     var retrySettingsOverride: RetrySettings? = null
@@ -29,8 +32,18 @@ internal class WarpLinkRuntime {
     val attributionResult: WarpLinkDeepLink?
         get() = synchronized(lock) { session?.storage?.cachedAttribution }
 
+    val tetherTestReceipt: String?
+        get() = synchronized(lock) { session?.storage?.referral?.tetherTestReceipt }
+
     val isAttributionComplete: Boolean
         get() = synchronized(lock) { session?.storage?.deferredCheckCompleted ?: false }
+
+    val deferredCheckStatus: DeferredCheckStatus
+        get() {
+            val storage = synchronized(lock) { session?.storage } ?: return DeferredCheckStatus.NotChecked
+            val running = deferredChecks.isRunning || launcher.hasWaitingCheck
+            return deferredCheckStatusOf(storage, running, System.currentTimeMillis())
+        }
 
     private val settings: RetrySettings
         get() = retrySettingsOverride ?: RetrySettings.DEFAULT
@@ -46,6 +59,13 @@ internal class WarpLinkRuntime {
             return
         }
         val live = synchronized(lock) {
+            // The same key and options again would rebuild an identical session and
+            // abandon the check it is running, so the running one stays. Only the
+            // new call's onLink replaces the old one.
+            session?.takeIf { it.isConfiguredWith(apiKey, options) }?.let {
+                it.adoptSink(options)
+                return
+            }
             session?.let(::retire)
             SdkSession.create(appContext, apiKey, options, ::resolveForCallback).also {
                 session = it
@@ -58,6 +78,7 @@ internal class WarpLinkRuntime {
         // An abandoned caller may have reconfigured. The newer configure then
         // runs the remaining steps for its own session, so this one stops.
         if (synchronized(lock) { session !== live }) return
+        (appContext as? Application)?.let(launcher::attach)
         startSession(appContext, apiKey, options, live)
     }
 
@@ -90,7 +111,7 @@ internal class WarpLinkRuntime {
         outcome.restart?.let { restarted ->
             // A callback answered above may have reconfigured. The restart belongs
             // to the Test session that was cleared and never runs on another.
-            restarted.fireAutomaticDeferredCheck({ checkDeferredIfCurrent(restarted, it) }) {
+            restarted.fireAutomaticDeferredCheck({ launcher.checkIfCurrent(restarted, it) }) {
                 dispatchAutoDeferred(restarted.autoHandler, it)
             }
         }
@@ -118,26 +139,7 @@ internal class WarpLinkRuntime {
         data?.let { handler.dispatch(it) }
     }
 
-    fun checkDeferred(callback: (Result<WarpLinkDeepLink?>) -> Unit) {
-        val inputs = synchronized(lock) { session }?.deferredCheckInputs(settings)
-        if (inputs == null) {
-            callback(Result.failure(WarpLinkError.NotConfigured))
-            return
-        }
-        deferredChecks.check(inputs, callback)
-    }
-
-    /** Runs the check on [expected] only while it is the current session; otherwise answers success(null). */
-    private fun checkDeferredIfCurrent(expected: SdkSession, callback: (Result<WarpLinkDeepLink?>) -> Unit) {
-        val inputs = synchronized(lock) {
-            if (session === expected) expected.deferredCheckInputs(settings) else null
-        }
-        if (inputs == null) {
-            callback(Result.success(null))
-            return
-        }
-        deferredChecks.check(inputs, callback)
-    }
+    fun checkDeferred(callback: (Result<WarpLinkDeepLink?>) -> Unit) = launcher.check(callback)
 
     fun referralContext(): ReferralContext? = synchronized(lock) {
         val current = session ?: return null
@@ -186,6 +188,7 @@ internal class WarpLinkRuntime {
             retrySettingsOverride = null
         }
         deferredChecks.reset()
+        launcher.reset()
         UriParser.resetKnownDomains()
     }
 

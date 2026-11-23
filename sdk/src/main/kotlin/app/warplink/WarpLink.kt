@@ -6,18 +6,13 @@ import android.net.Uri
 import androidx.annotation.VisibleForTesting
 import app.warplink.internal.RetrySettings
 import app.warplink.internal.UriParser
+import app.warplink.internal.onMainThread
 import app.warplink.internal.WarpLinkRuntime
 import app.warplink.internal.referral.ReferralEntry
 
 object WarpLink {
 
-    /**
-     * The SDK version. Sourced from the build's VERSION_NAME (the published
-     * Maven coordinate) via [BuildConfig] — do not replace this with a hardcoded
-     * literal. Keeping it generated guarantees the User-Agent and attribution
-     * `sdk_version` always match the released version, with nothing to bump by
-     * hand at release time beyond the git tag.
-     */
+    /** The SDK version, generated from the build's `VERSION_NAME` so it always matches the release. Never hardcode it. */
     val SDK_VERSION: String = BuildConfig.SDK_VERSION
 
     private val runtime = WarpLinkRuntime()
@@ -37,6 +32,13 @@ object WarpLink {
     /** Cached attribution result from the last deferred deep link check, or null if none. */
     val attributionResult: WarpLinkDeepLink?
         get() = runtime.attributionResult
+
+    /**
+     * Where the first-launch link check stands, so a skipped check reads
+     * differently from one that found no match. See [DeferredCheckStatus].
+     */
+    val deferredCheckStatus: DeferredCheckStatus
+        get() = runtime.deferredCheckStatus
 
     /**
      * Whether the deferred attribution check has definitively completed for this
@@ -91,25 +93,16 @@ object WarpLink {
      * Whether [uri] is a WarpLink link this SDK would claim: a host in the known
      * link-domain set AND a path that carries a slug (exactly one segment).
      *
-     * This is the check the automatic path already makes, exposed. The automatic
-     * dispatcher asks it before it touches anything else, so a URI it refuses
-     * never reaches the dedupe window, never claims a tap, and never supersedes
-     * a link still resolving: `AutoLinkHandler.dispatch` returns on a false
-     * answer before `claimLocked`. [handleDeepLink] routes on the same answer.
+     * It is the check the automatic path already makes, and [handleDeepLink]
+     * routes on the same answer. A host that forwards every incoming URI, such
+     * as an app with its own router or the React Native bridge, asks it before
+     * claiming anything: a [WarpLinkError.InvalidUrl] rejection comes too late.
+     * It is pure: it resolves nothing, claims nothing and touches no network.
      *
-     * Exposed because a host that forwards every incoming URI, an app with its
-     * own router or the React Native bridge, has to ask the same question at the
-     * same point. Learning it afterwards from a [WarpLinkError.InvalidUrl]
-     * rejection is too late to undo state a claim has already changed.
-     *
-     * Pure: it reads the known-domain set and returns. It resolves nothing,
-     * claims nothing, and touches no network.
-     *
-     * Before [configure] the known set is the default domain alone, `aplnk.to`,
-     * which is what the parser starts with and falls back to. A link on a custom
-     * domain therefore reads as false until [configure] has declared it (through
+     * Before [configure] the known set is the default domain, `aplnk.to`. A link
+     * on a custom domain reads as false until [configure] declares it (through
      * [WarpLinkOptions.linkDomains] or the manifest entry) or `/sdk/validate`
-     * has returned it.
+     * returns it.
      */
     fun isWarpLinkUri(uri: Uri): Boolean = UriParser.isWarpLinkUri(uri)
 
@@ -174,6 +167,28 @@ object WarpLink {
     ) {
         ReferralEntry.claim(installerId, runtime.referralContext(), callback)
     }
+
+    /**
+     * Answers like the other SDKs' Tether read, so one code path serves every
+     * platform. Android never reads the clipboard, so this always succeeds with
+     * [TetherReadResult.NoClipboard] on the main thread, or fails with
+     * [WarpLinkError.NotConfigured] before [configure].
+     */
+    fun readTether(callback: (Result<TetherReadResult>) -> Unit) {
+        val result = if (isConfigured) {
+            Result.success(TetherReadResult.NoClipboard)
+        } else {
+            Result.failure(WarpLinkError.NotConfigured)
+        }
+        onMainThread { callback(result) }
+    }
+
+    /**
+     * The receipt for the last Tether test code the install referrer carried,
+     * or null. Held in memory only: [clearAttribution] and a restart clear it.
+     */
+    val lastTetherTestReceipt: String?
+        get() = runtime.tetherTestReceipt
 
     @VisibleForTesting
     internal fun reset() = runtime.reset()

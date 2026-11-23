@@ -15,10 +15,30 @@ object WarpLink
 #### `SDK_VERSION`
 
 ```kotlin
-val SDK_VERSION: String // "1.3.0"
+val SDK_VERSION: String // "1.4.0"
 ```
 
 The current SDK version string.
+
+#### `deferredCheckStatus`
+
+```kotlin
+val deferredCheckStatus: DeferredCheckStatus
+```
+
+Where the deferred check stands for this install, read without sending a request. It tells a skipped check from no match. From Java, call `WarpLink.INSTANCE.getDeferredCheckStatus()`. It comes from state stored on the device, so a relaunch keeps it.
+
+| Type | Meaning |
+|------|---------|
+| `NotChecked` | No check has finished for this install and none is running. Also reported when a failed check's wait has passed. |
+| `Checking` | A check is running, or waiting for an activity to come on screen. |
+| `Matched` | The check finished and found a link. |
+| `NoMatch` | The check finished and found no link. |
+| `Waiting(retryAtMillis: Long)` | An earlier check failed. The SDK sends nothing before `retryAtMillis`, in epoch milliseconds. |
+| `SkippedOldInstall` | The install is older than 30 days by default, so no request is sent. |
+| `Stopped` | The SDK gave up 3 days after the first failure by default. No request is sent. |
+
+A `wl_test_` key never reports `Waiting`, `SkippedOldInstall` or `Stopped`.
 
 #### `isConfigured`
 
@@ -40,7 +60,7 @@ fun configure(
 )
 ```
 
-Configure the SDK with your SDK key. Call once, typically in `Application.onCreate()`.
+Configure the SDK with your SDK key. Call it once, typically in `Application.onCreate()`. A second call with the same key and the same options does nothing, and the running check keeps running. `onLink` is not part of that comparison: a new `onLink` replaces the old one. Adding an `onLink` where there was none, or removing it, rebuilds the SDK. A different key or different options rebuild the SDK.
 
 The `apiKey` parameter takes an **SDK key**, created in the dashboard under **API Keys** > **SDK key**. An API key has the same shape but cannot record install attribution.
 
@@ -168,8 +188,9 @@ Check for a deferred deep link on first launch. Returns `null` in the success ca
 
 **Behavior:**
 - Fires automatically from `configure()` when `automaticDeferredDeepLinks = true` (the default); call it directly only when you have disabled that flag.
-- On first launch: reads Play Install Referrer (deterministic). When the referrer carries a recovery token (`wl_rt`), the token is redeemed first, alone, for an exact match. A refused token is dropped and the check goes on with the link id and then probabilistic matching. A token the server cannot confirm yet ends the check without completing it, so the next launch tries again. Sends device signals to the attribution API and returns the match result.
-- Completion is recorded only on a definitive server response, so an offline first launch retries next launch. Once complete, subsequent launches return the cached result with no network call. The completion marker is stored in `noBackupFilesDir`, so a reinstall re-runs the check.
+- On first launch: reads Play Install Referrer (deterministic). When the referrer carries a recovery token (`wl_rt`), the token is redeemed first, alone, for an exact match. A refused token is dropped and the check goes on with the link id and then probabilistic matching. A token the server cannot confirm yet ends the check without completing it, so a later launch tries again, after the wait. Sends device signals to the attribution API and returns the match result.
+- Completion is recorded only on a definitive server response, so an offline first launch tries again on a later launch, after a wait that grows from 15 minutes to 1 day. The SDK stops 3 days after the first failure. A call made during a wait answers `null` and sends nothing. An install older than 30 days sends no request. A `wl_test_` key skips these limits.
+- The check starts only while one of your activities is on screen. A call made earlier waits and then runs. Once complete, subsequent launches return the cached result with no network call. The completion marker is stored in `noBackupFilesDir`, so a reinstall re-runs the check.
 - The matched deep link has `isDeferred = true` and includes `matchType`, `matchConfidence`, and `matchGuaranteed`.
 
 **Errors (returned via `Result.failure`):**
@@ -205,7 +226,7 @@ fun redeemInvitation(
 )
 ```
 
-Redeems a referral invitation the person pasted. The SDK never reads the clipboard: the text reaches it only through this call, from a paste control the person uses.
+Redeems a referral invitation the person pasted. This call reads nothing from the clipboard: the text reaches it only through this call, from a paste control the person uses.
 
 - Text that is not an invitation (not 50 base64url characters that decode to 37 bytes) sends nothing and answers `success(null)`.
 - An invitation past its own expiry fails on the device with no request. A `400` from the server fails with `WarpLinkError.ServerError(400, message)`, where the message tells the person to open the invitation link again. It is not retried.
@@ -465,4 +486,4 @@ See [Error Handling](error-handling.md) for recommended recovery actions for eac
 
 - `WarpLink.isConfigured` is thread-safe (protected by `synchronized` lock).
 - All callbacks (`handleDeepLink`, `checkDeferredDeepLink`) are dispatched to the **main thread**.
-- `configure()` can be called from any thread, but should be called once during app initialization.
+- `configure()` can be called from any thread. Call it once during app initialization. A repeat call with the same key and options changes nothing except `onLink`.

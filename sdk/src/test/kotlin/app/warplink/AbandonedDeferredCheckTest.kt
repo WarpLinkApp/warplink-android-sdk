@@ -137,11 +137,11 @@ class AbandonedDeferredCheckTest {
         val gate = CountDownLatch(1)
         val held = LoopbackJsonServer(NO_MATCH_JSON)
         held.serveOnce(gate)
-        configureAgainst(held.baseUrl)                  // the auto check is in flight, held by the gate
+        configureAgainst(held.baseUrl, debug = false)   // the auto check is in flight, held by the gate
         var answer: Result<WarpLinkDeepLink?>? = null
         WarpLink.checkDeferredDeepLink { answer = it }   // parked on that check
 
-        configureAgainst(held.baseUrl)                  // abandons it; parked callers are answered inline
+        configureAgainst(held.baseUrl, debug = true)    // other options rebuild the session, abandoning it; parked callers are answered inline
         gate.countDown()
         held.close()
 
@@ -151,11 +151,12 @@ class AbandonedDeferredCheckTest {
         assertNull(answer!!.getOrNull())
     }
 
-    private fun configureAgainst(baseUrl: String) {
+    private fun configureAgainst(baseUrl: String, debug: Boolean) {
         WarpLink.configure(
             context, validKey,
             WarpLinkOptions(
                 apiEndpoint = baseUrl,
+                debugLogging = debug,
                 automaticDeepLinks = false,
                 automaticDeferredDeepLinks = true,
                 onLink = { }

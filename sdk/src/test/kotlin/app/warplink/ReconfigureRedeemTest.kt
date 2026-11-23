@@ -16,7 +16,7 @@ import java.util.concurrent.CountDownLatch
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
-/** Configuring again retires the redeem the previous session had on the wire, even for the same key. */
+/** Configuring again with other options retires the redeem the previous session had on the wire, even for the same key. */
 @RunWith(RobolectricTestRunner::class)
 class ReconfigureRedeemTest {
 
@@ -41,15 +41,15 @@ class ReconfigureRedeemTest {
     }
 
     @Test
-    fun `a redeem answered after a reconfigure with the same key delivers no match`() {
-        configure()
+    fun `a redeem answered after a reconfigure with other options delivers no match`() {
+        configure(debug = false)
         api.serveOnce(gate = release)
         var answer: Result<WarpLinkDeepLink?>? = null
         val finished = CountDownLatch(1)
         WarpLink.redeemInvitation(validToken()) { answer = it; finished.countDown() }
         idleMainLooperUntil(message = "the redeem never reached the wire") { api.requestReceived.count == 0L }
 
-        configure()
+        configure(debug = true)
         release.countDown()
         idleMainLooperUntil(finished)
 
@@ -58,11 +58,15 @@ class ReconfigureRedeemTest {
         assertNotNull(Storage(context, KeyEnvironment.TEST).referral.pending.load(), "the invitation stays held for the next launch")
     }
 
-    private fun configure() {
+    /** The same key with other options is a new configuration: it rebuilds the session. */
+    private fun configure(debug: Boolean) {
         Storage(context, KeyEnvironment.TEST).apiKeyValidatedAt = System.currentTimeMillis()
         WarpLink.configure(
             context, key,
-            WarpLinkOptions(apiEndpoint = api.baseUrl, automaticDeepLinks = false, automaticDeferredDeepLinks = false)
+            WarpLinkOptions(
+                apiEndpoint = api.baseUrl, debugLogging = debug,
+                automaticDeepLinks = false, automaticDeferredDeepLinks = false
+            )
         )
     }
 }

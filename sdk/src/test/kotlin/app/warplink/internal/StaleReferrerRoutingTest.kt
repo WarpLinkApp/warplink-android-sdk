@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.warplink.LoopbackJsonServer
 import app.warplink.WarpLinkDeepLink
 import app.warplink.idleMainLooperUntil
+import app.warplink.internal.referral.ReferralFixtures
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -68,6 +69,17 @@ class StaleReferrerRoutingTest {
     }
 
     @Test
+    fun `a stale referrer with only a token that settles nothing still withholds the routing`() {
+        val delivered = runCheck(
+            ReferrerRead(null, nowSeconds - 30 * DAY, recoveryToken = ReferralFixtures.expiredToken())
+        )
+
+        assertNull(delivered, "the token fall-through to the device signals routed a month-old install")
+        assertTrue(Storage(context).deferredCheckCompleted, "the match must still settle the check")
+        assertNull(Storage(context).cachedAttribution, "nothing may be cached for attributionResult to replay")
+    }
+
+    @Test
     fun `a referrer from an install that began yesterday is routed`() {
         // The guard rail: a fresh Play install opened within the window is
         // exactly what deferred deep linking is for.
@@ -85,14 +97,17 @@ class StaleReferrerRoutingTest {
         assertEquals(LINK_ID, runCheck(installBegan = 0L)?.linkId)
     }
 
-    private fun runCheck(installBegan: Long): WarpLinkDeepLink? {
+    private fun runCheck(installBegan: Long): WarpLinkDeepLink? =
+        runCheck(ReferrerRead(LINK_ID, installBegan))
+
+    private fun runCheck(read: ReferrerRead): WarpLinkDeepLink? {
         val stub = LoopbackJsonServer(MATCH_JSON).also { stubs.add(it) }
         stub.serveOnce()
         val done = CountDownLatch(1)
         var delivered: Result<WarpLinkDeepLink?>? = null
         performDeferredCheck(
             Storage(context), FingerprintCollector(), ApiClient(API_KEY, stub.baseUrl),
-            ReferrerSource { it(Result.success(ReferrerRead(LINK_ID, installBegan))) }, null
+            ReferrerSource { it(Result.success(read)) }, null
         ) { delivered = it; done.countDown() }
         idleMainLooperUntil(done)
         return delivered!!.getOrThrow()
